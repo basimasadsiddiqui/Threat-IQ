@@ -1,0 +1,89 @@
+name: threatiq
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: threatiq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-threatiq}
+      POSTGRES_DB: threatiq
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threatiq -d threatiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Not published to the host: only the API needs to reach it.
+    expose:
+      - "5432"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    env_file:
+      # Optional so a fresh clone runs before anyone has written a .env.
+      # Every setting has a working default; keys simply stay unconfigured.
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://threatiq:${POSTGRES_PASSWORD:-threatiq}@postgres:5432/threatiq
+      CORS_ORIGINS: http://localhost:8501
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  # One-shot: embeds the security knowledge base into pgvector, then exits.
+  # Idempotent, so it is safe on every `up`. Retrieval works without it, this
+  # moves embedding from process start to deploy time and shares the corpus.
+  seed:
+    build:
+      context: .
+      target: api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://threatiq:${POSTGRES_PASSWORD:-threatiq}@postgres:5432/threatiq
+    command: ["python", "scripts/seed_knowledge.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ui:
+    build:
+      context: .
+      target: ui
+    environment:
+      THREATIQ_API_URL: http://api:8000
+      THREATIQ_API_KEY: ${API_KEY:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8501:8501"
+    restart: unless-stopped
+
+  # Optional: active web scanning. Started only with `--profile scanning`,
+  # and still refused unless the target is in AUTHORIZED_SCAN_TARGETS.
+  zap:
+    image: zaproxy/zap-stable:latest
+    profiles: ["scanning"]
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8090
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+      -config api.key=${ZAP_API_KEY:-changeme}
+    expose:
+      - "8090"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

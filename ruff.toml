@@ -1,0 +1,15 @@
+line-length = 90
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "C4"]
+ignore = [
+    "E501",   # long lines are caught by the formatter, not worth failing CI
+    "B008",   # FastAPI's Depends() in defaults is the documented pattern
+    "S101",   # assert is used for type narrowing only
+    "S311",   # no cryptographic randomness is used anywhere
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S", "E402"]
+"threatiq/tools/*" = ["S310"]   # URLs are validated by the SSRF guard

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.github/
+tests/
+data/
+*.md
+.env
+
+# Keep the theme: it is required for correct severity colouring.
+!.streamlit/

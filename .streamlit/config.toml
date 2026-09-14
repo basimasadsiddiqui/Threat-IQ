@@ -1,0 +1,125 @@
+# ThreatIQ theme.
+#
+# Rule one: COLOUR CARRIES MEANING HERE.
+#   Red / orange / amber belong to the severity scale and to nothing else.
+#   Blue means "interactive".
+# Streamlit's stock primaryColor is #FF4B4B, the same red this app uses for a
+# CRITICAL verdict, which is why it is overridden rather than inherited.
+#
+# Rule two: ONE THEME AT A TIME, BUT BOTH THEMES EXIST.
+#   `base` is deliberately NOT set. Streamlit then follows the viewer's own
+#   light/dark preference and applies the matching block below. Forcing dark
+#   would override an analyst who needs a light screen, and severity colours
+#   tuned for a dark canvas fail contrast on a white one, so each mode gets its
+#   own ramp rather than one palette stretched across both.
+
+[theme]
+# Shared across both modes: type, shape and metric weight.
+font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+headingFont = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+codeFont = "'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
+
+baseRadius = "small"
+buttonRadius = "small"
+showWidgetBorder = true
+showSidebarBorder = true
+metricValueFontSize = "2rem"
+metricValueFontWeight = 600
+
+
+# ---------------------------------------------------------------- dark mode
+[theme.dark]
+# #2f6fd8 is chosen so WHITE BUTTON TEXT clears WCAG AA at 4.79:1. The lighter
+# #4f8ff7 looked better but reached only 3.18:1 against white, which fails.
+primaryColor             = "#2f6fd8"
+backgroundColor          = "#0b0f14"   # off-black, never pure #000
+secondaryBackgroundColor = "#141b23"
+textColor                = "#e6edf3"
+borderColor              = "#243040"
+linkColor                = "#6aa3ff"
+
+redColor              = "#ea5459"   # critical
+redTextColor          = "#ff9592"
+redBackgroundColor    = "#3c1618"
+orangeColor           = "#f76808"   # high
+orangeTextColor       = "#ffa057"
+orangeBackgroundColor = "#3a1d0a"
+yellowColor           = "#ffb224"   # medium
+yellowTextColor       = "#f1c21b"
+yellowBackgroundColor = "#38290a"
+greenColor            = "#46a758"   # low / benign
+greenTextColor        = "#6ecf7f"
+greenBackgroundColor  = "#13291a"
+grayColor             = "#8b93a1"   # info / unknown
+grayTextColor         = "#9aa6b2"
+grayBackgroundColor   = "#1a212b"
+blueColor             = "#2f6fd8"
+blueTextColor         = "#8ab4ff"
+blueBackgroundColor   = "#101f38"
+
+chartCategoricalColors = [
+  "#e5484d", "#f76808", "#ffb224", "#46a758", "#6b7280",
+  "#5b93ee", "#a78bfa", "#22d3ee",
+]
+
+[theme.dark.sidebar]
+backgroundColor = "#0d131a"
+borderColor     = "#1e2733"
+
+
+# --------------------------------------------------------------- light mode
+[theme.light]
+# The dark ramp is unusable here: #e5484d on white is 3.6:1 and fails AA, so
+# every severity colour is darkened until it clears 4.5:1 on the panel fill.
+primaryColor             = "#2f6fd8"
+backgroundColor          = "#ffffff"
+secondaryBackgroundColor = "#f4f6f9"
+textColor                = "#0f172a"   # off-black, never pure #000
+borderColor              = "#d8dee7"
+linkColor                = "#1d5bd6"
+
+redColor              = "#c62a2f"   # critical
+redTextColor          = "#a51d24"
+redBackgroundColor    = "#fdeaea"
+orangeColor           = "#b4530a"   # high
+orangeTextColor       = "#9a3412"
+orangeBackgroundColor = "#fdefe3"
+yellowColor           = "#8a6116"   # medium
+yellowTextColor       = "#6b5310"
+yellowBackgroundColor = "#fbf3df"
+greenColor            = "#22713a"   # low / benign
+greenTextColor        = "#166534"
+greenBackgroundColor  = "#e7f5ec"
+grayColor             = "#4b5563"   # info / unknown
+grayTextColor         = "#55606e"
+grayBackgroundColor   = "#eef1f5"
+blueColor             = "#2f6fd8"
+blueTextColor         = "#1d5bd6"
+blueBackgroundColor   = "#e8f0fe"
+
+chartCategoricalColors = [
+  "#c62a2f", "#b4530a", "#8a6116", "#22713a", "#4b5563",
+  "#2f6fd8", "#7c5cd6", "#0e7490",
+]
+
+[theme.light.sidebar]
+backgroundColor = "#f7f9fb"
+borderColor     = "#e2e8f0"
+
+
+[server]
+headless = true
+
+# enableCORS was false here, which makes Streamlit send
+# "Access-Control-Allow-Origin: *" and accept a WebSocket connection from any
+# origin. XSRF protection does not close that hole, because opening a WebSocket
+# needs no XSRF token. For a console that displays investigation data about
+# live attacks, any-origin access is not an acceptable default.
+enableXsrfProtection = true
+enableCORS = true
+# Origins allowed to reach the app. Override for a real deployment; a hostname
+# that is not listed here cannot open a session.
+corsAllowedOrigins = ["http://localhost:8501", "http://127.0.0.1:8501"]
+
+[browser]
+gatherUsageStats = false
