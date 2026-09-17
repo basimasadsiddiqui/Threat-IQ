@@ -528,11 +528,16 @@ first implementation and would silently regress:
 The test suite, the API (every endpoint over HTTP), the full investigation
 pipeline, and the Streamlit UI were all run and pass in this environment.
 
-The Docker images could **not** be built here: this machine's user is not in the
-`docker` group, so the daemon socket is unreachable. `docker compose config`
-validates and all 33 pinned dependency versions were confirmed to exist on
-PyPI, but `docker compose up` itself is unverified. Build it once before you
-demo.
+**Both Docker images now build in CI**, on every push, from the pinned
+requirements. That closes a gap this section used to admit: the images could
+not be built on the development machine, whose user is not in the `docker`
+group, so nothing had ever installed `requirements.txt` from scratch. The
+working venv had drifted thirteen pins ahead of the file, which is how the
+console came to use a Streamlit parameter three minor versions newer than the
+pin, and neither CI nor a container could have rendered a single page.
+
+Still unverified: `docker compose up` as a whole, because CI builds the images
+but does not stand the stack up against Postgres. Run it once before you demo.
 
 ---
 
