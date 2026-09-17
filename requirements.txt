@@ -1,11 +1,11 @@
 # --- core app ---
-fastapi==0.115.6
-uvicorn[standard]==0.34.0  # ASGI server (invoked as a CLI, not imported)
-pydantic==2.10.4
-pydantic-settings==2.7.0
-python-dotenv==1.0.1     # used by pydantic-settings to read .env
+fastapi==0.141.1
+uvicorn[standard]==0.52.4  # ASGI server (invoked as a CLI, not imported)
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.3     # used by pydantic-settings to read .env
 httpx==0.28.1
-tenacity==9.0.0
+tenacity==9.1.4
 
 # --- agents / llm ---
 # These pins are the versions the LangGraph differential test in
@@ -18,7 +18,7 @@ langchain-google-genai==2.1.12   # Gemini provider, not exercised locally
 langsmith==0.12.4         # tracing; activated via environment variables
 
 # --- data ---
-sqlalchemy==2.0.36
+sqlalchemy==2.0.52
 psycopg[binary]==3.2.3   # SQLAlchemy's async PostgreSQL driver
 pgvector==0.3.6          # Vector column type for the knowledge store
 
@@ -26,15 +26,15 @@ pgvector==0.3.6          # Vector column type for the knowledge store
 # Levenshtein distance and cosine similarity are implemented in-tree rather
 # than pulled in as dependencies: both are a dozen lines, and the corpus is far
 # too small for a native extension to matter.
-networkx==3.4.2
+networkx==3.6.1
 pyvis==0.3.2
-tldextract==5.1.3
-dnspython==2.7.0
+tldextract==5.3.2
+dnspython==2.8.0
 
 # --- ui ---
-streamlit==1.41.1
-plotly==5.24.1
-pandas==2.2.3
+streamlit==1.63.0
+plotly==7.0.0
+pandas==3.0.5
 
 # --- observability ---
 opentelemetry-api==1.29.0
