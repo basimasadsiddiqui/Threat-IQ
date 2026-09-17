@@ -4,14 +4,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from threatiq.agents.graph import get_graph
 from threatiq.agents.state import new_state
 from threatiq.config import get_settings
 from threatiq.engine.indicators import classify_input
+from threatiq.llm import llm_for
 from threatiq.schemas import (
-    InvestigationReport, InvestigationRequest, RiskAssessment, ThreatGraph,
+    InvestigationReport,
+    InvestigationRequest,
+    RiskAssessment,
+    ThreatGraph,
 )
 from threatiq.tools.base import ToolContext
 
@@ -20,7 +24,10 @@ log = logging.getLogger(__name__)
 
 async def investigate(request: InvestigationRequest) -> InvestigationReport:
     """Run one investigation to completion and return a serializable report."""
-    settings = get_settings()
+    # Credentials the caller supplied for this request only. `with_overrides`
+    # returns a copy, so these keys live as long as this call and are never
+    # visible to a concurrent investigation or written anywhere.
+    settings = get_settings().with_overrides(request.resolved_overrides())
     started = time.monotonic()
     kind = request.kind or classify_input(request.input)
 
@@ -37,6 +44,7 @@ async def investigate(request: InvestigationRequest) -> InvestigationReport:
             internet_exposed=request.internet_exposed,
             allow_active_scan=request.allow_active_scan,
             tool_ctx=ctx,
+            llm=llm_for(settings),
         )
 
         runnable, backend = get_graph()
@@ -60,7 +68,7 @@ async def investigate(request: InvestigationRequest) -> InvestigationReport:
             )
             state = final if isinstance(final, dict) else state
             report.status = "completed"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("investigation %s timed out", report.id)
             report.status = "completed"
             report.error = (
@@ -83,7 +91,7 @@ async def investigate(request: InvestigationRequest) -> InvestigationReport:
         if state.get("error") and not report.error:
             report.error = str(state["error"])
 
-    report.completed_at = datetime.now(timezone.utc)
+    report.completed_at = datetime.now(UTC)
     log.info(
         "investigation %s finished in %.1fs: risk=%s findings=%d evidence=%d",
         report.id, time.monotonic() - started, report.risk.score,

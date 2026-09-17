@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from threatiq.config import Settings, get_settings
@@ -122,7 +122,7 @@ class InMemoryRepository(Repository):
     async def audit(self, actor: str, action: str, target: str = "",
                     detail: dict | None = None, success: bool = True) -> None:
         self._audit.append({
-            "at": datetime.now(timezone.utc).isoformat(), "actor": actor,
+            "at": datetime.now(UTC).isoformat(), "actor": actor,
             "action": action, "target": target, "detail": detail or {},
             "success": success,
         })
@@ -189,7 +189,10 @@ class PostgresRepository(Repository):
 
     async def save(self, report: InvestigationReport) -> None:
         from threatiq.db.models import (
-            EvidenceRow, FindingRow, IndicatorRow, Investigation,
+            EvidenceRow,
+            FindingRow,
+            IndicatorRow,
+            Investigation,
         )
 
         async with self.session_factory() as session:
@@ -372,19 +375,26 @@ def _jsonable(value: Any) -> Any:
     """JSONB columns reject datetimes and sets; normalise before writing."""
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         return [_jsonable(v) for v in value]
     if isinstance(value, datetime):
         return value.isoformat()
-    if isinstance(value, (str, int, float, bool)) or value is None:
+    if isinstance(value, str | int | float | bool) or value is None:
         return value
     return str(value)
 
 
 def _row_to_report(row: Any) -> InvestigationReport:
     from threatiq.schemas import (
-        AgentAction, Evidence, Finding, Indicator, InputKind, RemediationAction,
-        RiskAssessment, RiskFactor, ThreatGraph,
+        AgentAction,
+        Evidence,
+        Finding,
+        Indicator,
+        InputKind,
+        RemediationAction,
+        RiskAssessment,
+        RiskFactor,
+        ThreatGraph,
     )
 
     return InvestigationReport(

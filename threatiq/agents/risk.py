@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import logging
 
-from threatiq.agents.state import InvestigationState, timed_action
+from threatiq.agents.state import InvestigationState, llm_of, timed_action
 from threatiq.engine.risk_engine import RiskInput, assess
-from threatiq.llm import get_llm
 from threatiq.prompt_safety import neutralise
 
 log = logging.getLogger(__name__)
@@ -47,7 +46,7 @@ async def run(state: InvestigationState) -> InvestigationState:
             internet_exposed=bool(state.get("internet_exposed", True)),
         ))
 
-        llm = get_llm()
+        llm = llm_of(state)
         if llm.enabled and evidence:
             factor_lines = "\n".join(
                 f"  - {f.name}: contributed {f.contribution * 100:.1f} of "

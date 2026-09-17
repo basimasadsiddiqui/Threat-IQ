@@ -50,7 +50,7 @@ class ToolContext:
         if self.limiter is None:
             self.limiter = RateLimiter(self.settings)
 
-    async def __aenter__(self) -> "ToolContext":
+    async def __aenter__(self) -> ToolContext:
         if self.client is None:
             self.client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.settings.tool_timeout_s),
@@ -204,7 +204,7 @@ def timed(source: str, tool: str):
                 ev = await asyncio.wait_for(
                     fn(ctx, value), timeout=ctx.settings.tool_timeout_s + 5
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 ev = failed(source, tool, value, "tool timed out",
                             ToolStatus.RATE_LIMITED)
             except ResponseTooLarge as exc:
@@ -282,7 +282,7 @@ class ToolRegistry:
             return []
         results = await asyncio.gather(*coros, return_exceptions=True)
         out: list[Evidence] = []
-        for name, res in zip(resolved, results):
+        for name, res in zip(resolved, results, strict=False):
             if isinstance(res, Evidence):
                 out.append(res)
             elif isinstance(res, BaseException):

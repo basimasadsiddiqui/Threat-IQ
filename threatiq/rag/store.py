@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 
 from threatiq.config import Settings, get_settings
-from threatiq.knowledge.corpus import KNOWLEDGE_BASE, BY_ID, KnowledgeDoc
+from threatiq.knowledge.corpus import BY_ID, KNOWLEDGE_BASE, KnowledgeDoc
 from threatiq.rag.embeddings import Embedder, get_embedder
 
 log = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ class PgVectorStore:
                     )
                 """))
 
-            for doc, vector in zip(docs, vectors):
+            for doc, vector in zip(docs, vectors, strict=False):
                 await conn.execute(
                     text("""
                         INSERT INTO knowledge_docs

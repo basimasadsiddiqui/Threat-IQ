@@ -6,7 +6,11 @@ missing data reading as a clean verdict.
 """
 from threatiq.engine.risk_engine import RiskInput, assess
 from threatiq.schemas import (
-    Evidence, Finding, Severity, ToolStatus, Verdict,
+    Evidence,
+    Finding,
+    Severity,
+    ToolStatus,
+    Verdict,
 )
 
 

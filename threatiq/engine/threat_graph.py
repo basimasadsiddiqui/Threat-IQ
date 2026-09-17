@@ -10,7 +10,13 @@ import logging
 from typing import Any
 
 from threatiq.schemas import (
-    Evidence, Finding, GraphEdge, GraphNode, Indicator, ThreatGraph, Verdict,
+    Evidence,
+    Finding,
+    GraphEdge,
+    GraphNode,
+    Indicator,
+    ThreatGraph,
+    Verdict,
 )
 
 log = logging.getLogger(__name__)

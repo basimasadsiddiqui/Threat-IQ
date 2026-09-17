@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 
-from threatiq.agents.state import InvestigationState, timed_action
+from threatiq.agents.state import InvestigationState, llm_of, timed_action
 from threatiq.engine.indicators import (
-    classify_input, extract_indicators, primary_indicator,
+    classify_input,
+    extract_indicators,
+    primary_indicator,
     strip_infrastructure_headers,
 )
-from threatiq.llm import get_llm
+from threatiq.prompt_safety import neutralise, quoted
 from threatiq.schemas import IndicatorType, InputKind
 
 log = logging.getLogger(__name__)
@@ -42,7 +44,8 @@ _PLAN_PROMPT = """An analyst submitted the following for investigation.
 
 Input kind: {kind}
 Indicators extracted: {indicators}
-Input preview: {preview}
+
+{preview}
 
 Agents already scheduled (mandatory, cannot be removed): {required}
 Optional agents available:
@@ -88,17 +91,20 @@ async def orchestrate(state: InvestigationState) -> InvestigationState:
 
         reason = f"Input classified as {kind.value}; scheduled {', '.join(plan)}."
 
-        llm = get_llm()
+        llm = llm_of(state)
         if llm.enabled:
             optional = {k: v for k, v in AGENTS.items() if k not in plan}
             if optional:
                 proposal = await llm.structured(
                     _PLAN_PROMPT.format(
                         kind=kind.value,
-                        indicators=", ".join(
+                        indicators=neutralise(", ".join(
                             f"{i.type.value}={i.value}" for i in indicators[:12]
-                        ) or "none",
-                        preview=raw[:600],
+                        )) or "none",
+                        # The raw submission is the most attacker-controlled
+                        # string in the system and it reaches a prompt here.
+                        # Fenced like every other piece of quoted evidence.
+                        preview=quoted("submitted-input", raw, limit=600),
                         required=", ".join(plan),
                         optional="\n".join(f"- {k}: {v}" for k, v in optional.items()),
                     ),

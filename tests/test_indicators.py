@@ -1,7 +1,10 @@
 import pytest
 
 from threatiq.engine.indicators import (
-    classify_input, defang, extract_indicators, is_private_ip,
+    classify_input,
+    defang,
+    extract_indicators,
+    is_private_ip,
     strip_infrastructure_headers,
 )
 from threatiq.schemas import IndicatorType, InputKind

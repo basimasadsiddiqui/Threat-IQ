@@ -9,7 +9,18 @@ all, which is why it already produces real findings. Each key you add widens
 coverage and raises the confidence of the result rather than switching
 anything on.
 
-After pasting a key into `.env`, run:
+There are two places to put a key, and they suit different deployments.
+
+**The console's API keys page.** Paste a key, press Test keys, and it is checked
+against the service that issued it. The key is held for that browser session
+only: never written to disk, never shared with another visitor, sent with each
+request and used for that request alone. This is the right choice when more than
+one person uses the deployment, or when you would rather not put credentials on
+a server at all.
+
+**`.env` on the server.** One shared set of keys for everyone who uses the
+deployment, read once at start-up. Simplest for a machine only you use. After
+pasting a key into `.env`, restart the API and run:
 
 ```bash
 make keys

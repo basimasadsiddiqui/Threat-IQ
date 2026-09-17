@@ -2,11 +2,43 @@
 degrades gracefully instead of crashing when a key or service is absent."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Settings a single request is allowed to supply for its own duration, so an
+# analyst can bring their own API keys instead of the deployment holding them.
+#
+# An allowlist, not a denylist, so a field added to Settings later is closed by
+# default rather than silently becoming caller-controlled. What is deliberately
+# absent matters more than what is present:
+#
+#   api_key                  would let a caller rewrite the shared secret that
+#                            guards this API.
+#   authorized_scan_targets  would let a request authorise its own active scan.
+#                            That gate exists to withhold exactly this, and it
+#                            is the one privilege a caller must never grant
+#                            itself.
+#   max_response_bytes       would let a caller lift the ceiling that stops a
+#                            hostile host exhausting the container.
+#   rate_limit_*             would let a caller opt out of the pacing that keeps
+#                            this deployment inside a provider's free tier.
+OVERRIDABLE_SETTINGS = frozenset({
+    "virustotal_api_key",
+    "abuseipdb_api_key",
+    "urlscan_api_key",
+    "nvd_api_key",
+    "groq_api_key",
+    "google_api_key",
+    # Not a credential, but without it a supplied Gemini key is inert on a
+    # deployment configured for Groq, and the key would look broken.
+    "llm_provider",
+})
+
+_LLM_PROVIDERS = ("groq", "gemini", "none")
 
 
 class Settings(BaseSettings):
@@ -19,7 +51,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # --- API ---
-    api_host: str = "0.0.0.0"
+    # Binds every interface because the process runs inside a container
+    # and is reached through the published port; 127.0.0.1 would make it
+    # unreachable from outside. Exposure is controlled by the compose
+    # port mapping and by API_KEY, not by the bind address.
+    api_host: str = "0.0.0.0"  # noqa: S104  # nosec B104
     api_port: int = 8000
     api_base_url: str = "http://localhost:8000"
     # Shared secret between UI and API. Empty string disables auth (dev only).
@@ -115,6 +151,31 @@ class Settings(BaseSettings):
         if self.llm_provider == "gemini":
             return bool(self.google_api_key)
         return False
+
+    def with_overrides(self, overrides: Mapping[str, str] | None) -> Settings:
+        """A copy of these settings with caller-supplied credentials applied.
+
+        Returns a new object; the process-wide settings are never mutated, so
+        one investigation's keys cannot leak into another's. Callers that supply
+        nothing get `self` back unchanged.
+
+        Every value is checked by hand because `model_copy` deliberately skips
+        validation: it exists to build a model from trusted parts. Handing it an
+        unvalidated request body would put arbitrary strings into fields the
+        rest of the system reads as already-validated, which is how
+        `llm_provider` ends up as something no branch handles.
+        """
+        clean: dict[str, str] = {}
+        for name, value in (overrides or {}).items():
+            if name not in OVERRIDABLE_SETTINGS or not isinstance(value, str):
+                continue
+            value = value.strip()
+            if not value:
+                continue
+            if name == "llm_provider" and value not in _LLM_PROVIDERS:
+                continue
+            clean[name] = value
+        return self.model_copy(update=clean) if clean else self
 
     @property
     def rate_limit_override_map(self) -> dict[str, tuple[int, float]]:

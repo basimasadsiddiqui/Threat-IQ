@@ -252,3 +252,17 @@ def get_llm() -> LLMClient:
     if _client is None:
         _client = LLMClient()
     return _client
+
+
+def llm_for(settings: Settings) -> LLMClient:
+    """A client bound to one request's settings.
+
+    When the caller brought no key of their own, `Settings.with_overrides`
+    hands back the shared settings object unchanged, and this returns the
+    process-wide client. That keeps the ordinary path reusing one constructed
+    provider SDK object instead of rebuilding it per investigation; only a
+    request that actually supplied a key pays for its own.
+    """
+    if settings is get_settings():
+        return get_llm()
+    return LLMClient(settings)

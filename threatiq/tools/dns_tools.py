@@ -6,7 +6,7 @@ without a paid feed, so RDAP runs on every domain investigation.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from threatiq.engine.indicators import is_private_ip
@@ -34,7 +34,7 @@ def _resolve_sync(domain: str) -> dict[str, list[str]]:
         try:
             answers = resolver.resolve(domain, rtype)
             records[rtype] = sorted(r.to_text().strip('"') for r in answers)
-        except Exception:
+        except Exception:  # noqa: S112
             continue  # NXDOMAIN / NoAnswer per-type is normal, not an error
     return records
 
@@ -61,7 +61,6 @@ async def dns_lookup(ctx: ToolContext, domain: str) -> Evidence:
     # classic disposable-phishing pattern.
     has_mx = bool(records.get("MX"))
     spf = [t for t in records.get("TXT", []) if t.lower().startswith("v=spf1")]
-    dmarc_absent = True  # checked separately via _dmarc subdomain below
 
     signals: dict[str, Any] = {
         "resolves": True,
@@ -142,7 +141,7 @@ async def rdap_domain(ctx: ToolContext, domain: str) -> Evidence:
 
     age_days: int | None = None
     if registered_at:
-        age_days = (datetime.now(timezone.utc) - registered_at).days
+        age_days = (datetime.now(UTC) - registered_at).days
 
     # Age thresholds: most phishing domains are consumed within weeks of
     # registration, so recency is weighted heavily.

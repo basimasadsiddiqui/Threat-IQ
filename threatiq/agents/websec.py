@@ -19,7 +19,12 @@ from urllib.parse import urlparse
 
 from threatiq.agents.state import InvestigationState, timed_action
 from threatiq.schemas import (
-    Evidence, Finding, IndicatorType, Severity, ToolStatus, Verdict,
+    Evidence,
+    Finding,
+    IndicatorType,
+    Severity,
+    ToolStatus,
+    Verdict,
 )
 from threatiq.tools.base import ToolContext
 from threatiq.tools.http_probe import SECURITY_HEADERS, http_probe

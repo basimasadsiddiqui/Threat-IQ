@@ -7,7 +7,6 @@ from threatiq.tools.base import verdict_from_ratio
 from threatiq.tools.email_analysis import analyze_email
 from threatiq.tools.lookalike import analyze_domain
 
-
 # ----------------------------------------------------- brand impersonation
 
 @pytest.mark.parametrize("domain,brand", [

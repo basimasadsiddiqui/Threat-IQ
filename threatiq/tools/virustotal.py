@@ -6,7 +6,12 @@ from typing import Any
 
 from threatiq.schemas import Evidence, Severity, ToolStatus, Verdict
 from threatiq.tools.base import (
-    ToolContext, failed, registry, skipped, timed, verdict_from_ratio,
+    ToolContext,
+    failed,
+    registry,
+    skipped,
+    timed,
+    verdict_from_ratio,
 )
 
 _BASE = "https://www.virustotal.com/api/v3"

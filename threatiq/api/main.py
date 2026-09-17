@@ -14,19 +14,24 @@ from pydantic import BaseModel
 from threatiq import __version__
 from threatiq.agents.graph import get_graph
 from threatiq.agents.orchestrator import AGENTS
+from threatiq.api.throttle import get_inbound_limiter, throttle
 from threatiq.config import get_settings
 from threatiq.copilot import ask
 from threatiq.db.repo import Repository, get_repository, reset_repository
 from threatiq.engine import threat_graph as graph_engine
 from threatiq.engine.indicators import classify_input, extract_indicators
+from threatiq.keycheck import PROBES, check_keys
 from threatiq.llm import get_llm
 from threatiq.schemas import (
-    CopilotRequest, CopilotResponse, InvestigationReport, InvestigationRequest,
+    CopilotRequest,
+    CopilotResponse,
+    InvestigationReport,
+    InvestigationRequest,
     Severity,
+    WithKeyOverrides,
 )
 from threatiq.service import investigate
 from threatiq.telemetry import setup_langsmith, setup_logging, setup_opentelemetry
-from threatiq.api.throttle import get_inbound_limiter, throttle
 from threatiq.tools import registry
 from threatiq.tools.ratelimit import RateLimiter
 
@@ -149,6 +154,72 @@ async def list_tools() -> dict[str, Any]:
     return {"tools": [
         {**m, "configured": registry.configured(m["name"], s)}
         for m in registry.describe()
+    ]}
+
+
+@app.get("/settings/keys", tags=["meta"])
+async def list_key_providers() -> dict[str, Any]:
+    """The providers that accept a key, and whether this deployment holds one.
+
+    Never returns key material, only whether a given slot is filled, which
+    `/health` already publishes per tool. The console renders its settings page
+    from this so it stays a pure HTTP client with no second copy of the
+    provider list to drift out of step.
+    """
+    s = get_settings()
+    return {"providers": [
+        {
+            "name": p.name,
+            "setting": p.setting,
+            "signup": p.signup,
+            "unlocks": p.unlocks,
+            "optional": p.optional,
+            "server_configured": bool(getattr(s, p.setting, "")),
+        }
+        for p in PROBES
+    ]}
+
+
+class KeyTestRequest(WithKeyOverrides):
+    """Keys to verify. Inherits `key_overrides`, so nothing here is serialized
+    back out or carried into a log line."""
+
+
+@app.post("/settings/test-keys", tags=["meta"])
+async def test_keys(
+    body: KeyTestRequest,
+    actor: str = Depends(require_api_key),
+    _throttle: None = Depends(throttle),
+) -> dict[str, Any]:
+    """Ask each provider whether it recognises the key the caller supplied.
+
+    Only keys present in the request are probed. A provider the caller left
+    blank is reported as absent alongside whether this deployment holds one of
+    its own, which `/health` already publishes, rather than being probed with
+    the server's key: an unauthenticated caller must not be able to spend a
+    deployment's VirusTotal quota four requests at a time by reloading a page.
+
+    Throttled like `/investigate`, because it does reach out to the internet.
+    The destinations are fixed constants in `keycheck.PROBES`, so a caller
+    chooses which provider is asked, never where the request goes.
+    """
+    supplied = body.resolved_overrides()
+    server = get_settings()
+    results = await check_keys(supplied)
+    return {"results": [
+        {
+            "name": r.name,
+            "setting": r.setting,
+            "state": r.state,
+            "detail": r.detail,
+            "optional": r.optional,
+            "signup": r.signup,
+            "unlocks": r.unlocks,
+            # Lets the console say "you did not set one, but this deployment
+            # has" instead of reporting a working setup as missing.
+            "server_configured": bool(getattr(server, r.setting, "")),
+        }
+        for r in results
     ]}
 
 

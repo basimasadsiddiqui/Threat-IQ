@@ -6,15 +6,15 @@ Findings, the risk engine consumes both. Nothing downstream parses free text.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _uid() -> str:
@@ -33,7 +33,7 @@ class Severity(str, Enum):
         return {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}[self.value]
 
     @classmethod
-    def from_score(cls, score: float) -> "Severity":
+    def from_score(cls, score: float) -> Severity:
         if score >= 85:
             return cls.CRITICAL
         if score >= 65:
@@ -207,7 +207,40 @@ class AgentAction(BaseModel):
     status: str = "ok"
 
 
-class InvestigationRequest(BaseModel):
+class WithKeyOverrides(BaseModel):
+    """Mixin for requests that may carry the caller's own API keys.
+
+    Lets an analyst bring their own credentials instead of the deployment
+    holding a shared set, which is what makes a public console safe to offer:
+    nothing is written to disk and one caller's keys are never visible to
+    another.
+
+    Two protections, both structural rather than remembered:
+
+    `SecretStr` means an accidental log line, a traceback or a `model_dump()`
+    prints `**********` instead of the key. Requests get logged eventually,
+    somewhere, by someone, and that is exactly when a plain `str` would burn a
+    credential.
+
+    `exclude=True` keeps the field out of every serialization of the request,
+    so it cannot ride along into a stored report or an audit record.
+
+    Which field names are actually honoured is decided in one place, by
+    `Settings.with_overrides`, and nowhere else.
+    """
+    key_overrides: dict[str, SecretStr] = Field(
+        default_factory=dict, exclude=True, max_length=16,
+    )
+
+    def resolved_overrides(self) -> dict[str, str]:
+        """Plain values, for `Settings.with_overrides`. Keep the result local."""
+        return {
+            name: secret.get_secret_value()
+            for name, secret in self.key_overrides.items()
+        }
+
+
+class InvestigationRequest(WithKeyOverrides):
     input: str = Field(min_length=1, max_length=200_000)
     kind: InputKind | None = None      # None -> auto-detect
     context: dict[str, Any] = Field(default_factory=dict)
@@ -241,7 +274,7 @@ class InvestigationReport(BaseModel):
         return (self.completed_at - self.created_at).total_seconds()
 
 
-class CopilotRequest(BaseModel):
+class CopilotRequest(WithKeyOverrides):
     question: str = Field(min_length=1, max_length=4000)
     investigation_id: str | None = None
     history: list[dict[str, str]] = Field(default_factory=list)

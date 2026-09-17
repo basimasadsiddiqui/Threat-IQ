@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import logging
 
-from threatiq.agents.state import InvestigationState, timed_action
-from threatiq.llm import get_llm
+from threatiq.agents.state import InvestigationState, llm_of, timed_action
+from threatiq.prompt_safety import neutralise
 from threatiq.schemas import Finding, RemediationAction, Severity
 
 log = logging.getLogger(__name__)
@@ -185,15 +185,18 @@ async def run(state: InvestigationState) -> InvestigationState:
 
         actions = _dedupe(actions)
 
-        llm = get_llm()
+        llm = llm_of(state)
         if llm.enabled and findings:
             proposal = await llm.structured(
                 _ADD_PROMPT.format(
                     score=risk.score if risk else 0,
                     severity=risk.severity.value if risk else "unknown",
+                    # Titles and descriptions quote attacker-chosen strings,
+                    # and this is the prompt whose output becomes advice an
+                    # analyst may act on. Defanged before it is read.
                     findings="\n".join(
-                        f"- [{f.severity.value}] {f.title}: "
-                        f"{f.description[:200]}" for f in findings[:8]
+                        f"- [{f.severity.value}] {neutralise(f.title)}: "
+                        f"{neutralise(f.description[:200])}" for f in findings[:8]
                     ),
                     planned="\n".join(f"- {a.action}" for a in actions[:10]),
                 ),

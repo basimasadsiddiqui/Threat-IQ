@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 
-from threatiq.agents.state import InvestigationState, timed_action
+from threatiq.agents.state import InvestigationState, llm_of, timed_action
 from threatiq.knowledge.corpus import BY_CODE
-from threatiq.llm import get_llm
+from threatiq.prompt_safety import neutralise
 from threatiq.rag.retriever import get_retriever
 from threatiq.schemas import Finding
 
@@ -97,9 +97,13 @@ async def _map_one(finding: Finding, retriever, llm) -> Finding:
         )
         proposal = await llm.structured(
             _MAP_PROMPT.format(
-                title=finding.title, category=finding.category,
+                # A finding title carries attacker-chosen text: a page title,
+                # an email subject, a domain. `context` is our own corpus and
+                # is the one trusted string in this prompt.
+                title=neutralise(finding.title), category=finding.category,
                 severity=finding.severity.value,
-                description=finding.description[:900], context=context,
+                description=neutralise(finding.description[:900]),
+                context=context,
             ),
             system="You map security findings to frameworks using only "
                    "the references provided.",
@@ -145,7 +149,7 @@ async def run(state: InvestigationState) -> InvestigationState:
             return {"actions": [record]}
 
         retriever = get_retriever()
-        llm = get_llm()
+        llm = llm_of(state)
 
         # Map the most severe findings first and cap the count, mapping is the
         # most LLM-expensive stage and low findings rarely change a decision.

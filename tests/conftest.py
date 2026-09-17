@@ -13,8 +13,19 @@ from threatiq.schemas import Evidence, Severity, ToolStatus, Verdict  # noqa: E4
 @pytest.fixture(autouse=True)
 def _isolated_settings(monkeypatch):
     """Every test runs with no API keys and no LLM, so nothing hits the network
-    by accident and results are reproducible."""
-    from threatiq.config import get_settings
+    by accident and results are reproducible.
+
+    Clearing the environment variables is not enough on its own. `Settings`
+    also reads a `.env` file, so on any machine where someone has actually
+    configured ThreatIQ, real credentials were being loaded into the suite:
+    tests asserting the unconfigured path failed, and tests that reach a tool
+    could have spent that person's live quota. The file has to be detached, not
+    just the variables unset, and it is done here rather than in the tests that
+    happened to notice, because every test inherits the same exposure.
+    """
+    from threatiq.config import Settings, get_settings
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
 
     get_settings.cache_clear()
     for var in ("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY", "URLSCAN_API_KEY",

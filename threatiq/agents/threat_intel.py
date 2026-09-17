@@ -13,8 +13,15 @@ import logging
 from threatiq.agents.state import InvestigationState, timed_action
 from threatiq.engine.indicators import domain_of, is_private_ip
 from threatiq.schemas import (
-    Evidence, Finding, Indicator, IndicatorType, Severity, ToolStatus, Verdict,
+    Evidence,
+    Finding,
+    Indicator,
+    IndicatorType,
+    Severity,
+    ToolStatus,
+    Verdict,
 )
+
 # Import the package, not just base: this is what registers the tools.
 from threatiq.tools import registry
 

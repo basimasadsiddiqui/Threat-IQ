@@ -16,9 +16,11 @@ import pytest
 from threatiq.config import Settings
 from threatiq.schemas import Evidence, ToolStatus, Verdict
 from threatiq.tools.ratelimit import (
-    FREE_TIER_LIMITS, RateLimit, RateLimiter, TokenBucket,
+    FREE_TIER_LIMITS,
+    RateLimit,
+    RateLimiter,
+    TokenBucket,
 )
-
 
 # ------------------------------------------------------------- token bucket
 

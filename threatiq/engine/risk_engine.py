@@ -10,7 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from threatiq.schemas import (
-    Evidence, Finding, RiskAssessment, RiskFactor, Severity, ToolStatus, Verdict,
+    Evidence,
+    Finding,
+    RiskAssessment,
+    RiskFactor,
+    Severity,
+    ToolStatus,
+    Verdict,
 )
 
 # Weights sum to 1.0. Raising one means lowering another, keep it explicit.

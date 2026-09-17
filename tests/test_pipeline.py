@@ -7,7 +7,12 @@ reducers, and the ordering of correlation -> risk -> compliance -> remediation
 import pytest
 
 from threatiq.schemas import (
-    Evidence, InputKind, InvestigationRequest, Severity, ToolStatus, Verdict,
+    Evidence,
+    InputKind,
+    InvestigationRequest,
+    Severity,
+    ToolStatus,
+    Verdict,
 )
 
 
@@ -63,8 +68,8 @@ async def test_cve_routes_to_vulnerability_agent(stub_network):
 
 @pytest.mark.asyncio
 async def test_benign_domain_scores_low(stub_network, monkeypatch):
-    from threatiq.tools.base import registry
     from threatiq.service import investigate
+    from threatiq.tools.base import registry
 
     async def clean_rdap(ctx, domain):
         return Evidence(source="rdap", tool="domain", indicator=f"domain:{domain}",

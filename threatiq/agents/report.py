@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from threatiq.agents.state import InvestigationState, timed_action
-from threatiq.llm import get_llm
+from threatiq.agents.state import InvestigationState, llm_of, timed_action
 from threatiq.prompt_safety import neutralise, quoted
 from threatiq.schemas import Severity, ToolStatus
 
@@ -98,7 +97,7 @@ async def run(state: InvestigationState) -> InvestigationState:
         evidence = state.get("evidence", [])
         remediation = state.get("remediation", [])
 
-        llm = get_llm()
+        llm = llm_of(state)
         if llm.enabled and risk:
             prose = await llm.complete(
                 _SUMMARY_PROMPT.format(

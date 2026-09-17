@@ -216,7 +216,7 @@ def risk_gauge(score: float, severity: str) -> go.Figure:
     ))
     fig.update_layout(
         # Side margins keep the 0 and 100 axis labels from clipping.
-        height=150, margin=dict(l=30, r=30, t=10, b=4),
+        height=150, margin={"l": 30, "r": 30, "t": 10, "b": 4},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font={"color": ink["ink"]},
     )
@@ -261,7 +261,7 @@ def factor_chart(factors: list[dict]) -> go.Figure:
     )
     fig.update_layout(
         barmode="stack", height=68 + 40 * max(1, len(names)),
-        margin=dict(l=8, r=8, t=34, b=8),
+        margin={"l": 8, "r": 8, "t": 34, "b": 8},
         xaxis_title="Points of the model's 100",
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font={"color": ink["muted"], "size": 12},
@@ -321,7 +321,7 @@ def kv_row(items: list[tuple[str, str]]) -> None:
     """Compact label/value strip. Used instead of st.metric where the value is
     text rather than a number worth a large display treatment."""
     cols = st.columns(len(items))
-    for col, (label, value) in zip(cols, items):
+    for col, (label, value) in zip(cols, items, strict=False):
         col.caption(label)
         col.markdown(f"**{value}**")
 
@@ -411,7 +411,6 @@ def severity_bar(findings: list[dict]) -> None:
     ramp = sev_palette()
     order = ["critical", "high", "medium", "low", "info"]
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in order}
-    total = sum(counts.values()) or 1
 
     # Values here are integers and palette constants only, no external input.
     segments = "".join(
@@ -755,7 +754,7 @@ def render_report(report: dict) -> None:
             ))
             fig.update_layout(
                 height=60 + 32 * len(actions), xaxis_title="Duration (ms)",
-                margin=dict(l=8, r=8, t=8, b=8),
+                margin={"l": 8, "r": 8, "t": 8, "b": 8},
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 font={"color": palette()["muted"], "size": 12},
                 xaxis={"gridcolor": palette()["grid"]},
@@ -810,6 +809,9 @@ def page_investigate() -> None:
         report = api_post("/investigate", {
             "input": text, "asset_criticality": criticality,
             "internet_exposed": exposed, "allow_active_scan": active,
+            # Sent per request and used for this investigation only. The API
+            # never stores them.
+            "key_overrides": key_overrides(),
         })
         placeholder.empty()
         if report:
@@ -919,6 +921,7 @@ def page_copilot() -> None:
                 "investigation_id": context_id,
                 "history": [{"role": m["role"], "content": m["content"]}
                             for m in st.session_state["chat"][-6:]],
+                "key_overrides": key_overrides(),
             }, timeout=120)
             if response:
                 st.markdown(response["answer"])
@@ -967,6 +970,272 @@ def page_search() -> None:
                 severity_chip(f["severity"])
 
 
+# ------------------------------------------------------------------- settings
+
+# Keys supplied here live in st.session_state, which is server memory belonging
+# to one browser session. They are never written to disk, never shared with
+# another visitor, and gone when the session ends. The widget's `key` IS the
+# storage: there is deliberately no second copy to forget to clear.
+_KEY_PREFIX = "apikey:"
+
+# Providers the console can collect a key for when the API cannot be reached to
+# publish its own list. Kept minimal on purpose: the live catalogue from
+# /settings/keys is the real source, this is only so the page still renders
+# something useful while the backend is down.
+_FALLBACK_PROVIDERS = [
+    {"name": "VirusTotal", "setting": "virustotal_api_key", "optional": False,
+     "signup": "https://www.virustotal.com/gui/my-apikey",
+     "unlocks": "URL, domain, IP and file-hash reputation, plus 24% of the "
+                "risk model", "server_configured": False},
+    {"name": "AbuseIPDB", "setting": "abuseipdb_api_key", "optional": False,
+     "signup": "https://www.abuseipdb.com/account/api",
+     "unlocks": "IP abuse reports, the only IP reputation source",
+     "server_configured": False},
+]
+
+_LLM_SETTINGS = {"groq": "groq_api_key", "gemini": "google_api_key"}
+
+
+_PROVIDER_STATE = _KEY_PREFIX + "llm_provider"
+
+
+def session_keys() -> dict[str, str]:
+    """Credentials this browser session has supplied.
+
+    Excludes the language-model provider, which shares the same state prefix
+    but is a routing choice rather than a key. Counting it here would report
+    "1 key supplied" to a session that has supplied none.
+    """
+    return {
+        name[len(_KEY_PREFIX):]: value.strip()
+        for name, value in st.session_state.items()
+        if name.startswith(_KEY_PREFIX) and name != _PROVIDER_STATE
+        and isinstance(value, str) and value.strip()
+    }
+
+
+def key_overrides() -> dict[str, str]:
+    """What to send with a request: the credentials, plus the provider they
+    belong to when a language-model key is actually present.
+
+    The provider rides along only when there is a key for it. Sending the
+    selectbox's "none" default unconditionally would override a deployment's
+    own working language model with nothing, turning a visit to the settings
+    page into a silent downgrade of every later investigation.
+    """
+    keys = session_keys()
+    provider = st.session_state.get(_PROVIDER_STATE, "none")
+    if provider in _LLM_SETTINGS and keys.get(_LLM_SETTINGS[provider]):
+        keys["llm_provider"] = provider
+    return keys
+
+
+def effective_llm_enabled(health: dict | None) -> bool:
+    """Whether an investigation run from THIS session would reach a model.
+
+    /health answers for the deployment, which is the honest thing for it to
+    report, but it is the wrong question to put in front of the analyst. A
+    session holding a working provider key would otherwise be told "no language
+    model configured" while its own investigations were quite happily using one.
+    """
+    if (health or {}).get("llm", {}).get("enabled"):
+        return True
+    provider = st.session_state.get(_PROVIDER_STATE, "none")
+    return (provider in _LLM_SETTINGS
+            and bool(session_keys().get(_LLM_SETTINGS[provider])))
+
+
+def source_status(tool: dict, supplied: set[str] | None = None) -> str:
+    """How a source is configured, distinguishing who supplied the key.
+
+    "This session" rather than a bare "Configured": the two are not the same
+    fact, and an analyst deciding whether a thin result is trustworthy needs to
+    know which one they are looking at.
+    """
+    if tool.get("configured"):
+        return "Configured"
+    if (tool.get("requires_key") or "") in (supplied or set()):
+        return "This session"
+    return "No API key"
+
+
+def sources_missing_a_key(tools: dict | None, supplied: set[str]) -> list[str]:
+    """Sources still without a key once this session's own are counted."""
+    return [
+        t["name"] for t in (tools or {}).get("tools", [])
+        if not t.get("configured") and (t.get("requires_key") or "") not in supplied
+    ]
+
+
+def _clear_keys() -> None:
+    """Wipe every supplied key.
+
+    Runs as an on_click callback, which Streamlit executes before the script
+    reruns. Assigning to a widget's own session_state entry after that widget
+    has already been created in the current run is an error, so the timing here
+    is the point, not an accident.
+    """
+    for name in list(st.session_state.keys()):
+        if name.startswith(_KEY_PREFIX):
+            st.session_state[name] = ""
+    st.session_state.pop("key_results", None)
+
+
+def _key_state_tone(state: str) -> str:
+    """Map a probe verdict onto the console's severity encoding."""
+    return {"ok": "ok", "rejected": "bad",
+            "unreachable": "warn", "unclear": "warn"}.get(state, "info")
+
+
+def key_status_line(result: dict) -> None:
+    """One provider's verdict, colour-encoded by how much it matters.
+
+    A rejected key is a security-tool problem, not a preference: it makes its
+    tool report `error` rather than `skipped`, which reads as a failed lookup
+    rather than an absent one. It gets the critical colour for that reason.
+    """
+    state = result.get("state", "absent")
+    detail = result.get("detail", "")
+    if state == "absent" and result.get("server_configured"):
+        detail = "not set here; this deployment has one configured"
+    elif state == "absent":
+        detail = "not set" + ("" if result.get("optional") else ", recommended")
+    status_dot(_key_state_tone(state), f"{result.get('name', '')}: {detail}")
+
+
+def page_settings() -> None:
+    st.title("API keys")
+    st.caption("Keys are held for this browser session only. Nothing is "
+               "written to disk and nothing is shared with another visitor.")
+
+    catalogue = api_get("/settings/keys")
+    providers = (catalogue or {}).get("providers") or _FALLBACK_PROVIDERS
+    if catalogue is None:
+        st.warning(
+            "The API is unreachable, so this list may be incomplete. Keys you "
+            "enter are still kept for this session.",
+            icon=":material/cloud_off:",
+        )
+
+    st.info(
+        "ThreatIQ runs with no keys at all. Nine of its tools need none, and a "
+        "source without a key is reported as skipped rather than counted as a "
+        "clean result. Each key you add widens coverage and raises confidence "
+        "rather than switching anything on.",
+        icon=":material/info:",
+    )
+
+    intel = [p for p in providers if p["setting"] not in _LLM_SETTINGS.values()]
+    supplied = session_keys()
+
+    # Deliberately not an st.form. A form defers everything to its submit
+    # button, and both halves of that hurt here: the provider selectbox could
+    # not reveal the matching key field until you pressed something unrelated,
+    # and a key pasted without pressing the button never reached session state
+    # at all, so navigating to Investigate silently lost it. Outside a form each
+    # field commits as soon as you leave it, which is also what lets a key start
+    # working without being "saved" anywhere.
+    with st.container(border=True):
+        st.subheader("Intelligence sources")
+        for provider in intel:
+            setting = provider["setting"]
+            st.text_input(
+                provider["name"],
+                key=_KEY_PREFIX + setting,
+                type="password",
+                placeholder=("Using this deployment's key"
+                             if provider.get("server_configured")
+                             else "Paste your key, or leave blank to skip"),
+                help=f"{provider['unlocks']}. Get one at {provider['signup']}",
+            )
+            held = supplied.get(setting, "")
+            if held:
+                # Never echo the key. The length alone confirms a paste landed
+                # and is what catches the usual failure, a truncated copy.
+                st.caption(f"Held for this session, {len(held)} characters.")
+            elif provider.get("server_configured"):
+                st.caption("This deployment has a key configured for this "
+                           "source. Yours would take precedence.")
+
+        st.subheader("Language model")
+        st.caption("Optional. Risk scores, framework mappings and remediation "
+                   "are computed without it; a model writes the narrative "
+                   "around them.")
+        provider_choice = st.selectbox(
+            "Provider", ["none", "groq", "gemini"],
+            key=_KEY_PREFIX + "llm_provider",
+            format_func=lambda v: {"none": "No language model",
+                                   "groq": "Groq", "gemini": "Google Gemini"}[v],
+            help="Pick the provider your key belongs to. A Gemini key is inert "
+                 "on a deployment set to Groq, which makes a perfectly good "
+                 "key look broken.",
+        )
+        for name, setting in _LLM_SETTINGS.items():
+            if provider_choice == name:
+                st.text_input(
+                    f"{name.title()} API key",
+                    key=_KEY_PREFIX + setting, type="password",
+                    placeholder="Paste your key",
+                )
+                if supplied.get(setting):
+                    st.caption(f"Held for this session, "
+                               f"{len(supplied[setting])} characters.")
+
+        c1, c2 = st.columns([3, 1])
+        tested = c1.button(
+            "Test keys", type="primary", width="stretch",
+            icon=":material/network_check:",
+        )
+        c2.button(
+            "Clear", width="stretch", icon=":material/delete:",
+            on_click=_clear_keys,
+        )
+
+    if tested:
+        keys = session_keys()
+        if not keys:
+            st.warning(
+                "No keys to test. Paste at least one above.",
+                icon=":material/key_off:",
+            )
+        else:
+            with st.spinner("Asking each provider whether it accepts the key"):
+                st.session_state["key_results"] = api_post(
+                    "/settings/test-keys", {"key_overrides": keys}, timeout=60,
+                )
+
+    results = (st.session_state.get("key_results") or {}).get("results")
+    if results:
+        st.divider()
+        st.subheader("Verification")
+        rejected = [r for r in results if r["state"] == "rejected"]
+        for result in sorted(results, key=lambda r: r["state"] != "rejected"):
+            key_status_line(result)
+        if rejected:
+            st.error(
+                f"{len(rejected)} key(s) were rejected by the provider. A key "
+                f"that is present but wrong makes its tool report a failed "
+                f"lookup rather than an absent one, which is easy to miss in a "
+                f"long evidence table. Check for a stray space or a truncated "
+                f"paste.",
+                icon=":material/error:",
+            )
+        elif any(r["state"] == "ok" for r in results):
+            st.success(
+                "Every key supplied was accepted. They will be used for "
+                "investigations you run from this session.",
+                icon=":material/check_circle:",
+            )
+
+    st.divider()
+    st.caption(
+        "Keys travel from your browser to this console and on to the API, so "
+        "serve both over HTTPS anywhere other than localhost. To configure a "
+        "deployment with its own shared keys instead, set them in its .env and "
+        "restart the API."
+    )
+
+
 def page_status() -> None:
     st.title("System status")
     health = api_get("/health")
@@ -984,6 +1253,16 @@ def page_status() -> None:
     if llm["enabled"]:
         st.success(f"Language model: {llm['provider']} `{llm['model']}`",
                    icon=":material/smart_toy:")
+    elif effective_llm_enabled(health):
+        # The deployment holds no key but this session does, so investigations
+        # run from here do get a narrative. Saying otherwise would send someone
+        # to fix configuration that is already working for them.
+        provider = st.session_state.get(_PROVIDER_STATE, "none")
+        st.success(
+            f"Language model: {provider}, using a key supplied for this "
+            f"browser session. The deployment itself has none configured.",
+            icon=":material/smart_toy:",
+        )
     else:
         st.warning(
             "No language model is configured. Evidence collection, risk "
@@ -1002,14 +1281,19 @@ def page_status() -> None:
     st.subheader("Intelligence sources")
     tools = api_get("/tools")
     if tools:
+        # A source covered by a key from this session is not "No API key", and
+        # rendering it that way is the same failure as showing a skipped lookup
+        # as a clean result: it reports missing coverage that is not missing.
+        supplied = set(session_keys())
         st.dataframe(
             pd.DataFrame([{
                 "Source": t["name"],
-                "Status": "Configured" if t["configured"] else "No API key",
+                "Status": source_status(t, supplied),
                 "Accepts": ", ".join(t["accepts"]),
                 "Purpose": t["description"],
             } for t in sorted(tools["tools"],
-                              key=lambda t: (not t["configured"], t["name"]))]),
+                              key=lambda t: (source_status(t, supplied) == "No API key",
+                                             t["name"]))]),
             width="stretch", hide_index=True,
             column_config={"Purpose": st.column_config.TextColumn(
                 "Purpose", width="large")},
@@ -1041,7 +1325,7 @@ def page_status() -> None:
                 hovertemplate="%{x}: %{y}<extra></extra>",
             ))
             fig.update_layout(
-                height=260, margin=dict(l=8, r=8, t=8, b=8),
+                height=260, margin={"l": 8, "r": 8, "t": 8, "b": 8},
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 font={"color": palette()["muted"]},
                 yaxis={"gridcolor": palette()["grid"]},
@@ -1133,17 +1417,29 @@ def sidebar_status() -> None:
     if not health.get("auth_enabled"):
         status_dot("warn", "Authentication disabled")
 
-    missing = health.get("tools_unconfigured", [])
+    # /health describes the deployment. Reporting that verbatim tells a session
+    # holding its own working keys that nothing is configured, which is both
+    # wrong from where the analyst is sitting and the kind of warning that
+    # trains someone to stop reading this block.
+    held = session_keys()
+    if held:
+        missing = sources_missing_a_key(api_get("/tools"), set(held))
+    else:
+        missing = health.get("tools_unconfigured", [])
     if missing:
         status_dot("warn", f"{len(missing)} sources without an API key")
+    if held:
+        status_dot("info", f"{len(held)} key(s) supplied for this session")
 
     # Configuration facts, not warnings. Colouring these amber alongside
     # "Authentication disabled" would flatten the distinction between a
     # security problem and a deployment choice, which is the same mistake as
     # printing them all in identical grey.
     llm = health.get("llm", {})
-    if not llm.get("enabled"):
+    if not effective_llm_enabled(health):
         status_dot("info", "No language model configured")
+    elif not llm.get("enabled"):
+        status_dot("info", "Language model key supplied for this session")
 
     if health.get("repository", "").startswith("InMemory"):
         status_dot("info", "In-memory store, cleared on restart")
@@ -1163,6 +1459,7 @@ PAGES = [
     (page_history, "Investigations", ":material/history:", "investigations"),
     (page_copilot, "Security Copilot", ":material/forum:", "copilot"),
     (page_search, "Indicator pivot", ":material/hub:", "pivot"),
+    (page_settings, "API keys", ":material/key:", "keys"),
     (page_status, "System status", ":material/monitor_heart:", "status"),
 ]
 

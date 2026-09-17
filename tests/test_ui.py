@@ -113,6 +113,15 @@ class _Resp:
 
 
 def _fake_get(url, params=None, headers=None, timeout=None):
+    if "/settings/keys" in url:
+        return _Resp({"providers": [
+            {"name": "VirusTotal", "setting": "virustotal_api_key",
+             "signup": "https://example.invalid/vt", "unlocks": "reputation",
+             "optional": False, "server_configured": False},
+            {"name": "Groq", "setting": "groq_api_key",
+             "signup": "https://example.invalid/groq", "unlocks": "narrative",
+             "optional": True, "server_configured": False},
+        ]})
     if "/health" in url:
         return _Resp(HEALTH)
     if "/tools" in url:
@@ -141,6 +150,13 @@ def _fake_get(url, params=None, headers=None, timeout=None):
 
 
 def _fake_post(url, json=None, headers=None, timeout=None):
+    if "/settings/test-keys" in url:
+        return _Resp({"results": [
+            {"name": "VirusTotal", "setting": "virustotal_api_key",
+             "state": "ok", "detail": "accepted", "optional": False,
+             "signup": "https://example.invalid/vt", "unlocks": "reputation",
+             "server_configured": False},
+        ]})
     if "/classify" in url:
         return _Resp({"kind": "domain",
                       "indicators": [{"type": "domain",
@@ -162,7 +178,7 @@ def app(monkeypatch):
 
 
 PAGE_NAMES = ["Investigate", "Investigations", "Security Copilot",
-              "Indicator pivot", "System status"]
+              "Indicator pivot", "API keys", "System status"]
 
 
 def test_shell_renders_without_exception(app):
@@ -224,6 +240,162 @@ def test_navigation_is_wired_and_addressable():
     source = Path(APP).read_text(encoding="utf-8")
     assert "st.navigation(" in source
     assert "st.radio(" not in source, "navigation must not be a radio group"
+
+
+def _run_with_session(monkeypatch, body: str, **session):
+    """Execute a snippet inside the app's module context with session state set."""
+    import httpx
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(httpx, "get", _fake_get)
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    root = str(Path(APP).resolve().parents[1])
+    at = AppTest.from_string(
+        "import sys\n"
+        f"sys.path.insert(0, {root!r})\n"
+        "import streamlit as st\n"
+        "from ui.app import session_keys, key_overrides, page_settings\n"
+        + body,
+        default_timeout=30,
+    )
+    for name, value in session.items():
+        at.session_state[name] = value
+    return at.run()
+
+
+def test_provider_choice_is_not_counted_as_a_key(monkeypatch):
+    """The language-model selectbox shares the session prefix but is a routing
+    choice, not a credential.
+
+    Counting it would report "1 key supplied" to a session that supplied none,
+    and, worse, would send `llm_provider: none` with every request, overriding a
+    deployment's own working model with nothing. Visiting the settings page
+    would silently downgrade every later investigation.
+    """
+    at = _run_with_session(
+        monkeypatch,
+        "st.text(repr(sorted(session_keys())))\n"
+        "st.text(repr(sorted(key_overrides())))\n",
+        **{"apikey:llm_provider": "groq"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "[]"
+    assert at.text[1].value == "[]", "the provider was sent with no key behind it"
+
+
+def test_provider_rides_along_once_its_key_is_present(monkeypatch):
+    """It does have to be sent when there is a key, or a Gemini key is inert on
+    a deployment configured for Groq and looks broken."""
+    at = _run_with_session(
+        monkeypatch,
+        "st.text(repr(sorted(session_keys())))\n"
+        "st.text(repr(sorted(key_overrides())))\n",
+        **{"apikey:llm_provider": "gemini", "apikey:google_api_key": "g-test"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "['google_api_key']"
+    assert at.text[1].value == "['google_api_key', 'llm_provider']"
+
+
+def test_blank_keys_are_not_sent(monkeypatch):
+    """An emptied box must not send an empty string, which would blank out a
+    key the deployment has configured."""
+    at = _run_with_session(
+        monkeypatch,
+        "st.text(repr(sorted(session_keys())))\n",
+        **{"apikey:virustotal_api_key": "   "},
+    )
+    assert not at.exception
+    assert at.text[0].value == "[]"
+
+
+def test_a_session_llm_key_is_not_reported_as_no_model(monkeypatch):
+    """/health answers for the deployment, which is the wrong question to put in
+    front of the analyst.
+
+    A session holding a working provider key was being told "No language model
+    configured" while its own investigations were quite happily using one. That
+    reads as a fault and sends someone to fix configuration that is not broken.
+    """
+    at = _run_with_session(
+        monkeypatch,
+        "from ui.app import effective_llm_enabled\n"
+        "st.text(repr(effective_llm_enabled({'llm': {'enabled': False}})))\n",
+        **{"apikey:llm_provider": "groq", "apikey:groq_api_key": "gsk-test"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "True"
+
+
+def test_no_model_anywhere_still_reports_no_model(monkeypatch):
+    """The correction must not become a blanket claim that a model exists."""
+    at = _run_with_session(
+        monkeypatch,
+        "from ui.app import effective_llm_enabled\n"
+        "st.text(repr(effective_llm_enabled({'llm': {'enabled': False}})))\n",
+        **{"apikey:llm_provider": "groq"},  # provider chosen, no key behind it
+    )
+    assert not at.exception
+    assert at.text[0].value == "False"
+
+
+def test_a_source_covered_by_a_session_key_is_not_shown_as_missing(monkeypatch):
+    """Rendering a covered source as "No API key" is the same failure as showing
+    a skipped lookup as a clean result: it reports missing coverage that is not
+    missing."""
+    at = _run_with_session(
+        monkeypatch,
+        "from ui.app import source_status, sources_missing_a_key\n"
+        "tools = {'tools': [\n"
+        "  {'name': 'virustotal_url', 'requires_key': 'virustotal_api_key',\n"
+        "   'configured': False},\n"
+        "  {'name': 'abuseipdb_check', 'requires_key': 'abuseipdb_api_key',\n"
+        "   'configured': False},\n"
+        "  {'name': 'dns_lookup', 'requires_key': None, 'configured': True},\n"
+        "]}\n"
+        "supplied = {'virustotal_api_key'}\n"
+        "st.text(source_status(tools['tools'][0], supplied))\n"
+        "st.text(source_status(tools['tools'][1], supplied))\n"
+        "st.text(source_status(tools['tools'][2], supplied))\n"
+        "st.text(repr(sources_missing_a_key(tools, supplied)))\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "This session"
+    assert at.text[1].value == "No API key"
+    assert at.text[2].value == "Configured"
+    assert at.text[3].value == "['abuseipdb_check']"
+
+
+def test_the_sidebar_reports_a_session_model_once(monkeypatch):
+    """There were briefly two language-model lines, one saying it was
+    configured and one saying it was not."""
+    at = _run_with_session(
+        monkeypatch,
+        "from ui.app import sidebar_status\n"
+        "sidebar_status()\n",
+        **{"apikey:llm_provider": "groq", "apikey:groq_api_key": "gsk-test"},
+    )
+    assert not at.exception
+    rendered = "\n".join(str(getattr(el, "value", "")) for el in at.markdown)
+    assert rendered.count("No language model configured") == 0
+    assert rendered.count("Language model key supplied for this session") == 1
+
+
+def test_settings_page_never_renders_a_supplied_key(monkeypatch):
+    """The page confirms a paste landed by reporting its length. Echoing the
+    key itself would put it on screen, in a screenshot, and in the DOM."""
+    secret = "vt-secret-value-9876"
+    at = _run_with_session(
+        monkeypatch, "page_settings()\n",
+        **{"apikey:virustotal_api_key": secret},
+    )
+    assert not at.exception
+    rendered = "\n".join(
+        str(getattr(el, "value", "") or getattr(el, "body", ""))
+        for el in [*at.markdown, *at.caption, *at.text]
+    )
+    assert secret not in rendered
+    assert str(len(secret)) in rendered, "the length hint should confirm the paste"
 
 
 def test_report_renders_all_tabs(app):
@@ -386,7 +558,7 @@ def test_severity_colors_are_perceptually_separated(mode):
 
     ramp = _RAMP[mode]
     order = ["info", "low", "medium", "high", "critical"]
-    for lo, hi in zip(order, order[1:]):
+    for lo, hi in zip(order, order[1:], strict=False):
         distance = delta_e(ramp[lo], ramp[hi])
         assert distance >= 15.0, (
             f"{mode}: {lo} and {hi} are too close (delta-E {distance:.1f})")
@@ -418,7 +590,7 @@ def test_each_mode_reserves_red_for_severity(mode):
     """Streamlit's stock primaryColor is #FF4B4B, the same red this app uses
     for CRITICAL. Shipping the default would make 'clickable' and 'critical'
     the same colour."""
-    from ui.app import ACCENT, _RAMP
+    from ui.app import _RAMP, ACCENT
 
     block = _theme_config()[mode]
     assert block["primaryColor"].lower() == ACCENT.lower()
@@ -473,7 +645,7 @@ def test_colours_are_declared_once_not_scattered_through_render_code():
     body = source[boundary:]
 
     offenders = []
-    for line_no, line in enumerate(body.split("\n"), start=1):
+    for line in body.split("\n"):
         stripped = line.strip()
         if stripped.startswith("#"):          # comment
             continue

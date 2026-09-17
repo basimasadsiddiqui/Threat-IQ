@@ -6,17 +6,24 @@ than one JSON blob, because the Copilot needs to query across investigations
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -47,11 +54,11 @@ class Investigation(Base):
     agent_actions: Mapped[list] = mapped_column(JSONB, default=list)
     error: Mapped[str | None] = mapped_column(Text)
 
-    indicators: Mapped[list["IndicatorRow"]] = relationship(
+    indicators: Mapped[list[IndicatorRow]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan")
-    evidence: Mapped[list["EvidenceRow"]] = relationship(
+    evidence: Mapped[list[EvidenceRow]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan")
-    findings: Mapped[list["FindingRow"]] = relationship(
+    findings: Mapped[list[FindingRow]] = relationship(
         back_populates="investigation", cascade="all, delete-orphan")
 
 

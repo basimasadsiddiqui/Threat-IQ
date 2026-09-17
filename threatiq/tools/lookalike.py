@@ -82,7 +82,10 @@ def _registrable_label(domain: str) -> tuple[str, str]:
         extracted = tldextract.TLDExtract(suffix_list_urls=())(domain)
         if extracted.domain and extracted.suffix:
             return extracted.domain.lower(), extracted.suffix.lower()
-    except Exception:
+    except Exception:  # noqa: S110
+        # tldextract is an accelerator, not a dependency: the manual
+        # suffix split below is the fallback and is always correct enough
+        # for the comparison that follows.
         pass
 
     parts = domain.split(".")

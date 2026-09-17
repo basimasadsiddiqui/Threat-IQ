@@ -4,9 +4,16 @@ from __future__ import annotations
 import time
 from typing import Annotated, Any, TypedDict
 
+from threatiq.llm import LLMClient, get_llm
 from threatiq.schemas import (
-    AgentAction, Evidence, Finding, Indicator, InputKind, RemediationAction,
-    RiskAssessment, ThreatGraph,
+    AgentAction,
+    Evidence,
+    Finding,
+    Indicator,
+    InputKind,
+    RemediationAction,
+    RiskAssessment,
+    ThreatGraph,
 )
 from threatiq.tools.base import ToolContext
 
@@ -75,7 +82,22 @@ class InvestigationState(TypedDict, total=False):
 
     # --- runtime handles (not serialized to the DB) ---
     tool_ctx: ToolContext
+    # Bound to this investigation's settings, so a caller who supplied their own
+    # provider key gets a client that uses it. Absent in a bare state, which is
+    # what `llm_of` covers.
+    llm: LLMClient
     started_at: float
+
+
+def llm_of(state: InvestigationState) -> LLMClient:
+    """The client for this investigation, falling back to the shared one.
+
+    Agents must never reach for `get_llm()` directly: on a deployment holding no
+    key of its own, the shared client is disabled, and an agent bypassing the
+    state would silently take its deterministic branch even though the caller
+    supplied a perfectly good key.
+    """
+    return state.get("llm") or get_llm()
 
 
 def new_state(**kwargs: Any) -> InvestigationState:

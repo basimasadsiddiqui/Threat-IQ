@@ -10,9 +10,10 @@ from __future__ import annotations
 import logging
 import re
 
+from threatiq.config import get_settings
 from threatiq.db.repo import Repository
 from threatiq.engine.indicators import extract_indicators
-from threatiq.llm import get_llm
+from threatiq.llm import llm_for
 from threatiq.prompt_safety import neutralise, quoted
 from threatiq.rag.retriever import get_retriever
 from threatiq.schemas import CopilotRequest, CopilotResponse, InvestigationReport
@@ -152,7 +153,9 @@ async def ask(request: CopilotRequest, repo: Repository) -> CopilotResponse:
     retriever = get_retriever()
     knowledge, citations = await retriever.context_block(retrieval_query, top_k=4)
 
-    llm = get_llm()
+    # Honours a key the caller supplied for this question only, the same way an
+    # investigation does; otherwise this is the shared process-wide client.
+    llm = llm_for(get_settings().with_overrides(request.resolved_overrides()))
     if not llm.enabled:
         # The deterministic answer is assembled from stored investigation data
         # and never consults the knowledge base, so citing it would misrepresent

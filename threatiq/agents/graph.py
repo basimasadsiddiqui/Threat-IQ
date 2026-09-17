@@ -30,11 +30,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from threatiq.agents import (
-    compliance, correlation, orchestrator, phishing, remediation, report, risk,
-    threat_intel, vuln, websec,
+    compliance,
+    correlation,
+    orchestrator,
+    phishing,
+    remediation,
+    report,
+    risk,
+    threat_intel,
+    vuln,
+    websec,
 )
 from threatiq.agents.state import InvestigationState, merge_findings, merge_lists
 
@@ -98,7 +107,7 @@ def build_langgraph():
         # scheduled branches before the join runs.
         for name in SPECIALISTS:
             graph.add_edge(name, "correlation")
-        for (current, _), (nxt, _) in zip(PIPELINE, PIPELINE[1:]):
+        for (current, _), (nxt, _) in zip(PIPELINE, PIPELINE[1:], strict=False):
             graph.add_edge(current, nxt)
         graph.add_edge(PIPELINE[-1][0], END)
         return graph.compile()
@@ -122,7 +131,7 @@ class FallbackExecutor:
                 *(SPECIALISTS[name](state) for name in scheduled),
                 return_exceptions=True,
             )
-            for name, result in zip(scheduled, results):
+            for name, result in zip(scheduled, results, strict=False):
                 if isinstance(result, BaseException):
                     log.exception("specialist %s failed", name, exc_info=result)
                     state["error"] = f"{name} agent failed: {result}"

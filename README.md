@@ -34,6 +34,22 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+Or add them from the console's **API keys** page without touching a file. Keys
+entered there are held in the browser session, sent with each request, and used
+for that request only: nothing is written to disk, and one analyst's keys are
+never visible to another. That is what makes a shared or public deployment
+workable, since the alternative is one set of credentials belonging to whoever
+set the server up. The page verifies each key against the service that issued
+it before you rely on it.
+
+A caller may supply credentials and nothing else. The allowlist in
+`config.py:OVERRIDABLE_SETTINGS` is deliberately narrow, and what it leaves out
+is the point: `authorized_scan_targets` would let a request authorise its own
+active scan, `api_key` would let it rewrite the secret it is checked against,
+and `max_response_bytes` would let it lift the ceiling that stops a hostile host
+exhausting the container. It is an allowlist rather than a denylist so that a
+setting added later is closed by default.
+
 <details>
 <summary>Running without Docker</summary>
 
@@ -42,6 +58,49 @@ make install
 make run-api      # http://localhost:8000
 make run-ui       # http://localhost:8501  (second terminal)
 ```
+</details>
+
+### Prebuilt images
+
+Every push to `main` publishes both images to Docker Hub, so a reviewer can run
+ThreatIQ without cloning or building anything:
+
+```bash
+docker pull basimasadsiddiqui/threatiq-api:latest
+docker pull basimasadsiddiqui/threatiq-ui:latest
+```
+
+```bash
+docker network create threatiq
+docker run -d --name threatiq-api --network threatiq -p 8000:8000 \
+  basimasadsiddiqui/threatiq-api:latest
+docker run -d --name threatiq-ui --network threatiq -p 8501:8501 \
+  -e THREATIQ_API_URL=http://threatiq-api:8000 \
+  basimasadsiddiqui/threatiq-ui:latest
+```
+
+Dashboard at <http://localhost:8501>. A user-defined network rather than
+`host.docker.internal`, which does not resolve on Linux.
+
+Tags published: `latest` (default branch), `sha-<short>` for every commit, and
+the version for any `v*` tag. `docker compose up` still builds from source and
+remains the recommended path, because it also brings up Postgres and seeds the
+demo investigation.
+
+<details>
+<summary>Publishing from a fork</summary>
+
+The `publish` job is skipped unless two repository secrets are set, so a fork's
+CI stays green without credentials:
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | your Docker Hub account name |
+| `DOCKERHUB_TOKEN` | a Docker Hub **access token** with Read/Write scope, not your password |
+
+Create the token at Docker Hub → Account Settings → Personal access tokens, then
+add both under GitHub → Settings → Secrets and variables → Actions. The images
+are pushed as `<DOCKERHUB_USERNAME>/threatiq-api` and `.../threatiq-ui`.
 </details>
 
 ---
@@ -136,6 +195,84 @@ so the defender's own infrastructure is never investigated at all.)
 
 Missing coverage lowers **confidence**, never the score. The two numbers answer
 different questions: *how bad is this* and *how much do we know*.
+
+---
+
+## Agent prompt design
+
+Six agents talk to a model. None of them is asked to decide anything: every
+prompt hands over a finished computation and asks for prose or for a choice
+from a closed list. That shape is what makes the pipeline safe to run on
+hostile input, and it is deliberate in each case.
+
+### The shared preamble
+
+`threatiq/llm.py:GUARDRAIL` is prepended to every system prompt in the system,
+without exception. It carries two blocks. The first forbids introducing any
+fact — a detection count, a CVE, a vendor, an IP — that is not in the prompt,
+and forbids attribution to named actors. The second states that quoted evidence
+was written by the party under investigation, that instructions appearing
+inside it are data, and that an attempt to steer the analysis is itself
+reportable.
+
+### The six prompts
+
+| Agent | Given | May return | Cannot touch |
+|---|---|---|---|
+| `orchestrator` | Input kind, extracted indicators, a fenced 600-char preview, the mandatory plan, the optional agents | JSON `{"add": [...], "reason": ""}` | Cannot remove a mandatory agent — the result is filtered to additions drawn from the optional set, and `websec` is excluded so active scanning can never be granted by a model |
+| `risk` | The computed score, severity, confidence, every weighted factor with its contribution, and the defanged evidence summaries | 3–5 sentences of justification | The numbers are labelled authoritative; the engine's own factor breakdown stays appended underneath the prose, so the arithmetic is auditable regardless of what was written |
+| `compliance` | One finding plus the RAG-retrieved framework entries | JSON of OWASP / CWE / MITRE / NIST codes | Any code not in the retrieved set is discarded, as is a code filed under the wrong framework. A hallucinated `A11:2021` cannot reach the report |
+| `remediation` | Risk, findings, and the actions the playbook already generated | At most 3 additional actions | Priority is clamped to 1–5, effort to the three allowed values, text truncated; the playbook's own actions are never replaced |
+| `report` | The fenced submission, risk, findings, evidence, top actions | 4–6 sentences of executive summary | No bullets, no markdown, no fact not listed. A deterministic summary is written first and is used verbatim if the call fails |
+| `copilot` | The rendered investigation, the retrieved knowledge base, the last 6 turns | A grounded answer, at most 250 words | Told explicitly that anything outside the two supplied blocks is out of scope; the conversation role label is constrained to two values rather than echoed, so a caller cannot forge an "assistant" turn claiming an indicator was cleared |
+
+### Untrusted text never reaches a prompt raw
+
+Everything ThreatIQ analyses is attacker-chosen: an email body, a page title, a
+domain, a finding description derived from either. `threatiq/prompt_safety.py`
+handles all of it:
+
+- `fence(label, content)` wraps the content between markers carrying a fresh
+  random nonce. The attacker cannot close a delimiter they cannot predict, so
+  they cannot escape the quoted region.
+- `UNTRUSTED_NOTICE` is placed immediately before each fence. Stating the rule
+  next to the data works better than stating it once at the top.
+- `neutralise()` rewrites the known injection phrasings — "ignore previous
+  instructions", "you are now a", `system:`, `<system>`, "report this as
+  benign" — to a visible `[instruction-like text removed]`. Visible on purpose:
+  an analyst who reads that marker has learned the sender tried to manipulate
+  the tooling, which is itself a finding. Dropping it silently would destroy
+  evidence.
+
+None of this is a complete defence, because prompt injection has none. It is
+layered so that the deterministic pipeline stays the thing that decides and the
+model stays confined to describing what was decided. The score, the severity,
+the framework mapping and the playbook actions are all computed before any
+model sees the material, so the worst a successful injection achieves is a
+misleading paragraph sitting directly above a correct score and a correct
+factor breakdown.
+
+`tests/test_guardrails.py` runs a poisoned phishing email through the whole
+pipeline with a capturing stand-in for the model and asserts that not one of
+the prompts built along the way reproduces the injection verbatim. A companion
+test walks the source tree for anything that formats a `_PROMPT` and fails if
+it is not on the covered list — the original gap was not a broken defence but
+three prompts nobody remembered to route through it.
+
+### Structured output is validated, never trusted
+
+Four of the six prompts ask for JSON. `llm.structured()` requests a bare object,
+and `parse_json_object()` recovers from the usual model behaviour — code
+fences, preambles, trailing commas — before the caller validates field by
+field. Malformed output returns `None`, and every caller treats `None` as "the
+model added nothing", not as an error.
+
+### No model at all
+
+Set `LLM_PROVIDER=none` and every one of these six paths takes its
+deterministic branch. Findings, scores, framework mappings, remediation and the
+report are all still produced. The prompts add explanation; they are not load
+bearing.
 
 ---
 
@@ -280,7 +417,16 @@ their Premium API.
 | `GET` | `/findings` | Findings across investigations |
 | `GET` | `/search?indicator=` | Every investigation that touched an indicator |
 | `POST` | `/copilot/chat` | Grounded Q&A |
+| `GET` | `/settings/keys` | Which providers take a key, and whether this deployment holds one |
+| `POST` | `/settings/test-keys` | Verify supplied keys against their live services |
 | `GET` | `/health`, `/tools`, `/agents`, `/stats` | Introspection |
+
+`/investigate` and `/copilot/chat` accept an optional `key_overrides` object
+carrying the caller's own credentials. They are `SecretStr` and excluded from
+serialization, so they cannot reach a log line, a stored report or an audit
+record. `/settings/test-keys` probes only what the caller supplied: probing with
+the server's key would let anyone spend a deployment's VirusTotal quota, four
+requests at a time, by reloading a page.
 
 ```bash
 curl -s localhost:8000/investigate -H 'Content-Type: application/json' \
@@ -314,7 +460,7 @@ Every external dependency is optional. The API reports which are active at
 make test
 ```
 
-216 tests, no network access required. The suite runs with every API key unset,
+267 tests, no network access required. The suite runs with every API key unset,
 because that degraded path is the one most likely to ship.
 
 The most valuable tests encode calibration decisions that were wrong in the
@@ -326,6 +472,9 @@ first implementation and would silently regress:
 - `test_clean_critical_asset_is_not_medium_risk`
 - `test_scan_authorization_has_no_bypass`
 - `test_real_brand_is_not_a_typosquat_of_a_neighbouring_brand`
+- `test_overrides_cannot_authorise_an_active_scan`
+- `test_supplied_keys_do_not_reach_the_stored_report`
+- `test_provider_choice_is_not_counted_as_a_key`
 - `test_strip_infrastructure_headers_drops_folded_continuations`
 - `test_regional_brand_domains_are_not_flagged`
 
