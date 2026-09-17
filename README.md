@@ -105,6 +105,49 @@ are pushed as `<DOCKERHUB_USERNAME>/threatiq-api` and `.../threatiq-ui`.
 
 ---
 
+## Deploying
+
+### Hugging Face Spaces (free)
+
+```bash
+deploy/huggingface/deploy.sh <username>/<space-name>
+```
+
+Then add **one** secret in the Space's settings: `API_KEY`, any long random
+string. Deliberately nothing else. A public Space holding a VirusTotal key
+would spend its owner's free-tier quota on behalf of every visitor, and that
+free API is not licensed for it. Visitors bring their own keys through the
+console's API keys page, which is the case that feature exists for.
+
+A Space gets one container and one published port, so the image runs both
+processes and the pipeline takes degraded paths it already supports: the
+in-memory repository instead of Postgres, the in-process retrieval index
+instead of pgvector. Analysis is unchanged; investigations simply do not
+survive a restart. uvicorn binds loopback, so only the console is published and
+`/investigate` cannot be driven from the internet.
+
+Two things the platform forces, neither of which is guessable from the
+compose setup:
+
+- **The CORS allowlist has to be written at start.** Streamlit refuses a
+  WebSocket from an unlisted origin, the checked-in allowlist is localhost, and
+  the real hostname only exists at runtime as `SPACE_HOST`. Without the rewrite
+  in `entrypoint.sh` the console loads and then hangs at "Please wait" for ever,
+  with nothing in the log to say why.
+- **The Space is assembled from an allowlist, not synced.** A Space is a public
+  git repo. `deploy.sh` copies only named paths into a temporary directory and
+  then refuses to push if any value from your `.env` appears anywhere in the
+  payload.
+
+### Anywhere else
+
+`docker compose up -d --build` brings up the full stack with Postgres and
+pgvector. Put it behind a reverse proxy that terminates TLS: keys travel from
+the browser to the console and on to the API, and `API_KEY` is a bearer secret,
+so plain HTTP hands both to anyone on the path.
+
+---
+
 ## How an investigation runs
 
 ```
