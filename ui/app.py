@@ -25,9 +25,35 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-API_BASE = os.getenv("THREATIQ_API_URL", "http://localhost:8000")
-API_KEY = os.getenv("THREATIQ_API_KEY", "")
-TIMEOUT = float(os.getenv("THREATIQ_TIMEOUT", "300"))
+
+def setting(name: str, default: str = "") -> str:
+    """A deployment setting, from the environment or from Streamlit secrets.
+
+    Compose and a local run use environment variables. A host that offers only
+    a secrets panel, which is the usual shape of free Streamlit hosting, has
+    nowhere to put one, so the same names are accepted there. Reading secrets
+    raises when no secrets file exists at all, which is the ordinary local
+    case, so that is not an error worth surfacing.
+    """
+    value = os.getenv(name, "")
+    if not value:
+        try:
+            value = str(st.secrets[name])
+        except Exception:
+            value = ""
+    return value or default
+
+
+TIMEOUT = float(setting("THREATIQ_TIMEOUT", "300"))
+
+# Where the API lives. Compose, Docker and a local `make run-api` all set this.
+# THREATIQ_EMBED_API asks for the single-process arrangement instead, where the
+# API runs on a background thread in this process because the host gives us
+# only one: see ui/embedded.py. The console cannot tell the difference, which
+# is the point, it speaks HTTP either way.
+_CONFIGURED_API = setting("THREATIQ_API_URL")
+_EMBED_API = setting("THREATIQ_EMBED_API").lower() in ("1", "true", "yes")
+_FALLBACK_API = "http://localhost:8000"
 
 # Single source of truth for severity presentation. `rank` drives every sort in
 # this file; `color` matches the ramp in .streamlit/config.toml.
@@ -145,13 +171,43 @@ def sev_color(name: str) -> str:
 
 # --------------------------------------------------------------- API client
 
+@st.cache_resource(show_spinner=False)
+def _embedded_api() -> str:
+    """Start the API in this process, once per app run. See ui/embedded.py."""
+    from ui.embedded import start_backend
+    return start_backend()
+
+
+def API_BASE() -> str:  # noqa: N802  # reads as a constant at every call site
+    """Where the API is.
+
+    Resolved on first use rather than at import. The embedded backend takes a
+    few seconds to come up and reports progress through Streamlit, which cannot
+    be touched before st.set_page_config has run; doing this at module level
+    put a spinner ahead of it and the app refused to start.
+    """
+    if _CONFIGURED_API:
+        return _CONFIGURED_API
+    if _EMBED_API:
+        return _embedded_api()
+    return _FALLBACK_API
+
+
 def _headers() -> dict[str, str]:
-    return {"X-API-Key": API_KEY} if API_KEY else {}
+    """Auth header, read at call time rather than captured at import.
+
+    The embedded backend generates a shared secret when the host supplied none,
+    and it does that while starting, which is after this module is imported. A
+    value captured at import would still be empty by then and the console would
+    401 against the API running inside it.
+    """
+    key = setting("THREATIQ_API_KEY")
+    return {"X-API-Key": key} if key else {}
 
 
 def api_get(path: str, **params: Any) -> dict[str, Any] | None:
     try:
-        r = httpx.get(f"{API_BASE}{path}", params=params,
+        r = httpx.get(f"{API_BASE()}{path}", params=params,
                       headers=_headers(), timeout=30.0)
         r.raise_for_status()
         return r.json()
@@ -161,13 +217,13 @@ def api_get(path: str, **params: Any) -> dict[str, Any] | None:
         st.error(f"API returned {exc.response.status_code}: "
                  f"{exc.response.text[:280]}")
     except httpx.HTTPError as exc:
-        st.error(f"Cannot reach the ThreatIQ API at {API_BASE}. {exc}")
+        st.error(f"Cannot reach the ThreatIQ API at {API_BASE()}. {exc}")
     return None
 
 
 def api_post(path: str, payload: dict, timeout: float = TIMEOUT) -> dict | None:
     try:
-        r = httpx.post(f"{API_BASE}{path}", json=payload,
+        r = httpx.post(f"{API_BASE()}{path}", json=payload,
                        headers=_headers(), timeout=timeout)
         r.raise_for_status()
         return r.json()
@@ -695,7 +751,7 @@ def render_report(report: dict) -> None:
             # The graph is served into an iframe, which does not inherit the
             # host page's theme, so the active mode is passed explicitly.
             st.iframe(
-                f"{API_BASE}/investigations/{report.get('id', '')}"
+                f"{API_BASE()}/investigations/{report.get('id', '')}"
                 f"/graph.html?theme={active_theme()}",
                 height=600,
             )
@@ -1411,7 +1467,7 @@ def sidebar_status() -> None:
 
     if not health:
         status_dot("bad", "API unreachable")
-        st.caption(API_BASE)
+        st.caption(API_BASE())
         return
 
     if not health.get("auth_enabled"):

@@ -107,7 +107,52 @@ are pushed as `<DOCKERHUB_USERNAME>/threatiq-api` and `.../threatiq-ui`.
 
 ## Deploying
 
-### Hugging Face Spaces (free)
+### Streamlit Community Cloud (free)
+
+Point <https://share.streamlit.io> at this repo with **`ui/app.py`** as the main
+file, and set two entries under **Advanced settings -> Secrets**:
+
+```toml
+THREATIQ_EMBED_API = "1"
+API_KEY = "any long random string"
+```
+
+`THREATIQ_EMBED_API` is the one that matters. The host runs
+`streamlit run ui/app.py` and nothing else, so there is nowhere to put a second
+process the way Compose does, and the API comes up on a background thread
+inside the console instead (`ui/embedded.py`), bound to loopback on an
+unpredictable port.
+
+The console is not told about any of this. It goes on speaking HTTP, through
+the same client, with the same auth header and the same error handling it uses
+against Compose. Having it import the pipeline directly would have been less
+code and worse: two code paths, of which the one nobody demos would quietly
+rot.
+
+Leave the intelligence keys out. The deployment is public, and a shared
+VirusTotal key would spend its owner's free-tier quota for every visitor on an
+API that is not licensed for it. Visitors bring their own through the API keys
+page.
+
+What you give up is persistence: no Postgres, so the in-memory store is cleared
+on restart and retrieval uses the in-process index. Both are paths the pipeline
+already supports, and analysis is unchanged.
+
+Two behaviours worth knowing:
+
+- **The first visit is slow.** The backend starts on the first page render, not
+  at boot, because that is when the console first asks where the API is.
+- **A key is generated when you do not set one.** Not because it defends
+  anything, the API is in this process on loopback, but because without one the
+  console would show "Authentication disabled. Do not expose this deployment"
+  permanently and untruthfully, and a status block that cries wolf gets skimmed.
+
+### Hugging Face Spaces (needs PRO)
+
+Not free any more: Hugging Face answers `HTTP 402` for a Docker Space on the
+free tier, saying that only Static Spaces are free and that Docker Spaces
+require a PRO subscription. The deployment below is built and works up to that
+paywall, so it is a one-command deploy if you have PRO.
 
 ```bash
 deploy/huggingface/deploy.sh <username>/<space-name>
