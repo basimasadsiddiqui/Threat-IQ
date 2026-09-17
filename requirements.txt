@@ -19,7 +19,7 @@ langsmith==0.12.4         # tracing; activated via environment variables
 
 # --- data ---
 sqlalchemy==2.0.52
-psycopg[binary]==3.2.3   # SQLAlchemy's async PostgreSQL driver
+psycopg[binary]==3.2.13   # SQLAlchemy's async PostgreSQL driver
 pgvector==0.3.6          # Vector column type for the knowledge store
 
 # --- analysis ---
