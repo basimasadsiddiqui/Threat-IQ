@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Publish ThreatIQ to a Hugging Face Space.
 #
-#   deploy/huggingface/deploy.sh <username>/<space-name>
+#   deploy/huggingface/deploy.sh [<username>/<space-name>]
 #
-# Needs a write token from https://huggingface.co/settings/tokens, given as
-# $HF_TOKEN or typed when prompted. The token is never written to disk and is
-# kept out of the pushed remote URL, so it cannot end up in the Space's git
-# config or in your shell history via the remote.
+# Needs a write token from https://huggingface.co/settings/tokens. It is read
+# from $HF_TOKEN, or from the file `huggingface-cli login` writes, or typed
+# when prompted. Log in once and this needs no argument at all: the owner is
+# read back from the token and the Space is created if it does not exist.
+#
+# The token is never written to disk by this script and is kept out of the
+# remote URL, so it cannot end up in the Space's git config, in a process
+# listing, or in shell history.
 #
 # The Space repo is assembled from scratch in a temporary directory each time,
 # copying only the files the image needs. That is deliberate: a Space is a
@@ -15,12 +19,7 @@
 # is named below.
 set -euo pipefail
 
-SPACE_ID="${1:-}"
-if [ -z "${SPACE_ID}" ] || [[ "${SPACE_ID}" != */* ]]; then
-  echo "usage: $0 <username>/<space-name>" >&2
-  exit 2
-fi
-
+SPACE_ARG="${1:-}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HERE="${ROOT}/deploy/huggingface"
 
@@ -35,7 +34,18 @@ PAYLOAD=(
   "LICENSE"
 )
 
+# Prefer a token already on this machine, so a deploy does not need the
+# credential handed to it again each time.
+STORED="${HF_HOME:-${HOME}/.cache/huggingface}/token"
+if [ -z "${HF_TOKEN:-}" ] && [ -r "${STORED}" ]; then
+  HF_TOKEN="$(tr -d '\r\n' < "${STORED}")"
+  echo "==> using the token from ${STORED}"
+fi
 if [ -z "${HF_TOKEN:-}" ]; then
+  echo "No Hugging Face token found. Either run:" >&2
+  echo "    huggingface-cli login" >&2
+  echo "  or create one at https://huggingface.co/settings/tokens (write scope)" >&2
+  echo >&2
   read -rsp "Hugging Face write token (input hidden): " HF_TOKEN
   echo
 fi
@@ -43,6 +53,50 @@ if [ -z "${HF_TOKEN}" ]; then
   echo "error: no token supplied" >&2
   exit 2
 fi
+
+echo "==> checking the token"
+WHOAMI="$(curl -fsS -H "Authorization: Bearer ${HF_TOKEN}" \
+  https://huggingface.co/api/whoami-v2 2>/dev/null)" || {
+    echo "error: the token was rejected by Hugging Face" >&2
+    exit 1
+  }
+HF_USER="$(printf '%s' "${WHOAMI}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+echo "  authenticated as ${HF_USER}"
+
+# Default the Space to this account, so the common case needs no argument and
+# nobody deploys to a name they typed wrong.
+SPACE_ID="${SPACE_ARG:-${HF_USER}/threatiq}"
+if [[ "${SPACE_ID}" != */* ]]; then
+  SPACE_ID="${HF_USER}/${SPACE_ID}"
+fi
+SPACE_NAME="${SPACE_ID#*/}"
+SPACE_OWNER="${SPACE_ID%%/*}"
+
+echo "==> ensuring the Space exists: ${SPACE_ID}"
+# Creating an existing repo returns 409, which is success for our purposes.
+#
+# `organization` is only valid when the Space belongs to an org. Sending it for
+# a personal account, with the account's own name in it, is rejected.
+if [ "${SPACE_OWNER}" = "${HF_USER}" ]; then
+  CREATE_BODY=$(printf '{"name":"%s","type":"space","sdk":"docker","private":false}' \
+    "${SPACE_NAME}")
+else
+  CREATE_BODY=$(printf '{"name":"%s","organization":"%s","type":"space","sdk":"docker","private":false}' \
+    "${SPACE_NAME}" "${SPACE_OWNER}")
+fi
+CREATE_CODE="$(curl -sS -o /tmp/hf_create.$$ -w '%{http_code}' \
+  -X POST https://huggingface.co/api/repos/create \
+  -H "Authorization: Bearer ${HF_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "${CREATE_BODY}")" || true
+case "${CREATE_CODE}" in
+  200|201) echo "  created" ;;
+  409)     echo "  already exists" ;;
+  *)       echo "  create returned HTTP ${CREATE_CODE}:" >&2
+           cat "/tmp/hf_create.$$" >&2; echo >&2
+           echo "  continuing; the push will fail if the Space is missing" >&2 ;;
+esac
+rm -f "/tmp/hf_create.$$"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
