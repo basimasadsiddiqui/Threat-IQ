@@ -232,6 +232,66 @@ def API_BASE() -> str:  # noqa: N802  # reads as a constant at every call site
     return _embedded_api()
 
 
+# st.Page objects, keyed by url_path, filled in by main(). Navigation needs the
+# object rather than the path, and a button deep in the report has no way to
+# reach the list that built them.
+_PAGES_BY_PATH: dict[str, Any] = {}
+
+
+def goto(path: str) -> None:
+    """Switch to another page of the console."""
+    page = _PAGES_BY_PATH.get(path)
+    if page is not None:
+        st.switch_page(page)
+
+
+def report_label(row: dict) -> str:
+    """The name of an investigation, for a list or a dropdown.
+
+    Falls back to the id only when talking to an older API that does not send a
+    label, rather than rendering an empty string.
+    """
+    return row.get("label") or row.get("input", "")[:70] or row.get("id", "")
+
+
+def suggested_questions(report: dict) -> list[str]:
+    """Questions worth asking about THIS investigation.
+
+    An empty chat box is a poor prompt for someone who has just been handed a
+    risk score: the useful questions are not obvious until you already know
+    what the tool can answer. These are derived from what the investigation
+    actually found, so they are never suggestions the evidence cannot support.
+    """
+    risk = report.get("risk") or {}
+    findings = report.get("findings") or []
+    evidence = report.get("evidence") or []
+    questions = ["How do I fix this?"]
+
+    if len(findings) > 1:
+        questions.append(
+            "Which single action should I do first, and why that one rather "
+            "than the others?")
+
+    # The most misread number on the page: a score that stayed high while the
+    # reputation sources said nothing.
+    if any(e.get("source") in ("virustotal", "abuseipdb")
+           and e.get("verdict") in ("benign", "unknown") for e in evidence):
+        questions.append(
+            "The reputation sources found nothing. Does that mean it is safe?")
+
+    if risk.get("coverage", 1.0) < 0.9:
+        questions.append(
+            f"This was scored on {risk.get('coverage', 0):.0%} of the model's "
+            f"weight. What could not be checked, and how much does that matter?")
+
+    if any(f.get("owasp") or f.get("mitre_attack") for f in findings):
+        questions.append(
+            "Which frameworks does this map to, and what do those controls "
+            "actually require me to do?")
+
+    return questions[:4]
+
+
 def _headers() -> dict[str, str]:
     """Auth header, read at call time rather than captured at import.
 
@@ -932,7 +992,15 @@ def page_investigate() -> None:
 
     if report:
         st.divider()
+        st.subheader(defang(report_label(report)))
         st.caption(f"Investigation `{report['id']}`")
+        # The question every analyst has the moment the score appears, and
+        # until now the only route to it was noticing the Copilot in the
+        # sidebar and then re-selecting this investigation by its id.
+        if st.button("Ask the Copilot how to fix this", type="primary",
+                     icon=":material/forum:"):
+            st.session_state["copilot_context"] = report["id"]
+            goto("copilot")
         render_report(report)
     elif not submitted:
         st.info(
@@ -956,7 +1024,7 @@ def page_history() -> None:
         pd.DataFrame([{
             "Severity": r["severity"].upper(),
             "Risk": r["risk_score"],
-            "Input": defang(r["input"][:70]),
+            "Investigation": defang(report_label(r)),
             "Type": r["kind"],
             "Findings": r["finding_count"],
             "When": r["created_at"][:19].replace("T", " "),
@@ -966,14 +1034,16 @@ def page_history() -> None:
         column_config={
             "Risk": st.column_config.ProgressColumn(
                 "Risk", min_value=0, max_value=100, format="%.1f"),
-            "Input": st.column_config.TextColumn("Input", width="large"),
+            "Investigation": st.column_config.TextColumn(
+                "Investigation", width="large"),
         },
     )
 
     chosen = st.selectbox(
         "Open an investigation", [r["id"] for r in rows],
         format_func=lambda i: next(
-            f"{r['severity'].upper()} {r['risk_score']}  {r['input'][:52]}"
+            f"{r['severity'].upper()} {r['risk_score']}  "
+            f"{defang(report_label(r))}"
             for r in rows if r["id"] == i),
     )
     if chosen:
@@ -990,14 +1060,38 @@ def page_copilot() -> None:
                "security knowledge base.")
 
     data = api_get("/investigations", limit=50)
-    ids = [r["id"] for r in (data or {}).get("investigations", [])]
-    options = ["None"] + ids
-    index = options.index(st.session_state["last_id"]) \
-        if st.session_state.get("last_id") in options else 0
-    picked = st.selectbox("Investigation context", options, index=index)
+    rows = (data or {}).get("investigations", [])
+    names = {r["id"]: report_label(r) for r in rows}
+    severities = {r["id"]: r.get("severity", "info") for r in rows}
+    options = ["None"] + list(names)
+
+    # Arriving from the report's "Ask the Copilot" button, which is the whole
+    # point of that button: nobody should have to recognise their own
+    # investigation by its hex id.
+    handed_over = st.session_state.pop("copilot_context", None)
+    preferred = handed_over or st.session_state.get("last_id")
+    index = options.index(preferred) if preferred in options else 0
+
+    picked = st.selectbox(
+        "Investigation context", options, index=index,
+        format_func=lambda i: "None" if i == "None" else (
+            f"{severities.get(i, 'info').upper()}  {defang(names.get(i, i))}"),
+    )
     context_id = None if picked == "None" else picked
 
     st.session_state.setdefault("chat", [])
+
+    # Starter questions, offered before the conversation begins rather than
+    # alongside it, so they do not compete with the analyst's own follow-ups.
+    asked_from_button = None
+    if context_id and not st.session_state["chat"]:
+        report = api_get(f"/investigations/{context_id}")
+        if report:
+            st.caption("Or start with one of these:")
+            for n, question in enumerate(suggested_questions(report)):
+                if st.button(question, key=f"suggested_{n}",
+                             icon=":material/help:"):
+                    asked_from_button = question
     for message in st.session_state["chat"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -1005,7 +1099,8 @@ def page_copilot() -> None:
                 st.caption("Frameworks referenced: "
                            + ", ".join(message["citations"]))
 
-    question = st.chat_input("Why is this critical? What should I fix first?")
+    question = asked_from_button or st.chat_input(
+        "Why is this critical? What should I fix first?")
     if question:
         st.session_state["chat"].append({"role": "user", "content": question})
         with st.chat_message("user"):
@@ -1054,7 +1149,7 @@ def page_search() -> None:
     for r in sorted(results, key=lambda r: -sev_rank(r["severity"])):
         with st.expander(
             f"{r['severity'].upper()} at risk {r['risk_score']}  ·  "
-            + defang(r["input"][:60]),
+            + defang(report_label(r)),
             icon=SEVERITY.get(r["severity"], SEVERITY["info"])["icon"],
         ):
             st.markdown("**Matched:** " + ", ".join(
@@ -1564,14 +1659,16 @@ def main() -> None:
     # Radio circles are a form affordance: they say "choose a value", not "go
     # to a page". It also gives every page its own URL, so an analyst can send
     # a colleague a link to the Copilot or to a specific investigation.
-    nav = st.navigation(
-        [
-            st.Page(fn, title=title, icon=icon, url_path=path,
-                    default=(i == 0))
-            for i, (fn, title, icon, path) in enumerate(PAGES)
-        ],
-        position="sidebar",
+    pages = [
+        st.Page(fn, title=title, icon=icon, url_path=path, default=(i == 0))
+        for i, (fn, title, icon, path) in enumerate(PAGES)
+    ]
+    # st.switch_page wants the Page object, and a button rendered deep inside a
+    # report has no way to reach the list that built them.
+    _PAGES_BY_PATH.update(
+        {path: page for page, (_, _, _, path) in zip(pages, PAGES, strict=True)}
     )
+    nav = st.navigation(pages, position="sidebar")
 
     st.logo(wordmark(active_theme()), size="large", link=None)
 

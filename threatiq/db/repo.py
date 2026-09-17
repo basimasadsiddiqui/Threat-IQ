@@ -132,6 +132,9 @@ class InMemoryRepository(Repository):
 def _summary_row(report: InvestigationReport) -> dict[str, Any]:
     return {
         "id": report.id,
+        # Derived rather than stored, so every report already in the database
+        # gets a name too, and the wording stays in one place.
+        "label": report.label,
         "created_at": report.created_at.isoformat(),
         "status": report.status,
         "input": report.input[:180],

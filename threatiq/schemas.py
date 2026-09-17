@@ -5,12 +5,13 @@ Findings, the risk engine consumes both. Nothing downstream parses free text.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, computed_field
 
 
 def _now() -> datetime:
@@ -272,6 +273,43 @@ class InvestigationReport(BaseModel):
         if not self.completed_at:
             return 0.0
         return (self.completed_at - self.created_at).total_seconds()
+
+    @property
+    def subject(self) -> str:
+        """What was submitted, in a form that fits on one line.
+
+        An email arrives as a whole message, so the raw input is a wall of
+        headers. Its Subject line is what an analyst would call the thing, and
+        failing that the sender; only then the raw text.
+        """
+        if self.kind == InputKind.EMAIL_MESSAGE:
+            for header in ("Subject", "From"):
+                match = re.search(rf"^{header}:\s*(.+)$", self.input,
+                                  re.IGNORECASE | re.MULTILINE)
+                if match and match.group(1).strip():
+                    text = " ".join(match.group(1).split())[:70]
+                    return text if header == "Subject" else f"Email from {text}"
+        return " ".join(self.input.split())[:70] or "(empty submission)"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def label(self) -> str:
+        """A name for this investigation that says what it was about.
+
+        An id like `8c3f262643f3` is the right primary key and a useless thing
+        to show a person: it cannot be recognised in a list, recalled a day
+        later, or read aloud. The name is derived from what the investigation
+        actually concluded, so it is reproducible and carries no claim the
+        evidence does not support, the same rule the score follows. Nothing
+        here is model-written.
+        """
+        if self.findings:
+            worst = max(self.findings, key=lambda f: (f.severity.rank, f.confidence))
+            concern = worst.category.replace("_", " ")
+            return f"{self.subject} - {concern}"
+        if self.status == "failed":
+            return f"{self.subject} - investigation failed"
+        return f"{self.subject} - no findings"
 
 
 class CopilotRequest(WithKeyOverrides):

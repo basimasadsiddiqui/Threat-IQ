@@ -31,6 +31,7 @@ HEALTH = {
 
 REPORT = {
     "id": "abc123def456", "status": "completed", "input": "paypa1-login.tk",
+    "label": "paypa1-login.tk - phishing",
     "kind": "domain", "summary": "A domain impersonating PayPal.",
     "error": None,
     "created_at": "2026-09-13T12:00:00+00:00",
@@ -93,6 +94,7 @@ REPORT = {
 
 SUMMARY_ROW = {
     "id": "abc123def456", "created_at": "2026-09-13T12:00:00+00:00",
+    "label": "paypa1-login.tk - phishing",
     "status": "completed", "input": "paypa1-login.tk", "kind": "domain",
     "risk_score": 72.3, "severity": "high", "confidence": 0.63,
     "finding_count": 2, "evidence_count": 2,
@@ -968,3 +970,69 @@ def test_the_fallback_address_is_not_the_localhost_alias():
     from ui.app import _FALLBACK_API
 
     assert _FALLBACK_API == "http://127.0.0.1:8000"
+
+
+def test_an_investigation_is_shown_by_name_not_by_id(monkeypatch):
+    """A hex id is the right primary key and a useless thing to show a person.
+
+    It cannot be recognised in a list, recalled a day later, or read aloud, and
+    the Copilot's context picker was asking analysts to choose their own
+    investigation from a column of them.
+    """
+    at = _run_with_session(
+        monkeypatch,
+        "from ui.app import report_label\n"
+        "st.text(report_label({'id':'abc123','label':'evil.tk - phishing',"
+        "'input':'evil.tk'}))\n"
+        # An older API sends no label; the id must not be what appears.
+        "st.text(report_label({'id':'abc123','input':'evil.tk'}))\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "evil.tk - phishing"
+    assert at.text[1].value == "evil.tk"
+
+
+def test_the_copilot_preselects_the_investigation_handed_to_it(monkeypatch):
+    """The report's "Ask the Copilot" button exists so nobody has to find their
+    own investigation again by its id, so the handover has to actually land."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "st.text(st.session_state.get('copilot_context', 'MISSING'))\n"
+        "app.page_copilot()\n"
+        # Consumed by the page, so a later visit is not stuck on it for ever.
+        "st.text(st.session_state.get('copilot_context', 'consumed'))\n",
+        **{"copilot_context": "abc123def456"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "abc123def456"
+    assert at.text[1].value == "consumed", "the handover must not be sticky"
+
+
+def test_suggested_questions_come_from_what_was_actually_found(monkeypatch):
+    """Never a question the evidence cannot support: an empty chat box is a
+    poor prompt for someone who has just been handed a risk score."""
+    at = _run_with_session(
+        monkeypatch,
+        "import json\n"
+        "from ui.app import suggested_questions\n"
+        "rich = {'risk': {'coverage': 0.56},\n"
+        "        'findings': [{'owasp': ['A07:2021'], 'mitre_attack': []},\n"
+        "                     {'owasp': [], 'mitre_attack': ['T1566']}],\n"
+        "        'evidence': [{'source': 'virustotal', 'verdict': 'benign'}]}\n"
+        "bare = {'risk': {'coverage': 1.0}, 'findings': [], 'evidence': []}\n"
+        "st.text(json.dumps(suggested_questions(rich)))\n"
+        "st.text(json.dumps(suggested_questions(bare)))\n",
+    )
+    assert not at.exception
+    rich = json.loads(at.text[0].value)
+    bare = json.loads(at.text[1].value)
+
+    assert "How do I fix this?" in rich
+    assert any("rather than the others" in q for q in rich), "two findings, so ask which first"
+    assert any("Does that mean it is safe" in q for q in rich), "clean reputation is the most misread result"
+    assert len(rich) <= 4, "a wall of suggestions is as unhelpful as none"
+
+    # An investigation with one finding and full coverage must not be offered
+    # questions about things that did not happen.
+    assert bare == ["How do I fix this?"]
