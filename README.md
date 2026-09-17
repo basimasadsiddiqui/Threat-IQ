@@ -193,7 +193,7 @@ so plain HTTP hands both to anyone on the path.
 
 ---
 
-## How an investigation runs
+## Architecture: how an investigation runs
 
 ```
                             submitted input
@@ -586,7 +586,7 @@ but does not stand the stack up against Postgres. Run it once before you demo.
 
 ---
 
-## Interface
+## UI and UX
 
 Streamlit, themed through `.streamlit/config.toml` rather than shipped on the
 stock palette. Two rules drive the whole design.
