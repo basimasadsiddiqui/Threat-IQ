@@ -1036,3 +1036,81 @@ def test_suggested_questions_come_from_what_was_actually_found(monkeypatch):
     # An investigation with one finding and full coverage must not be offered
     # questions about things that did not happen.
     assert bare == ["How do I fix this?"]
+
+
+def test_a_supplied_key_survives_navigating_to_another_page(monkeypatch):
+    """The bug: keys vanished the moment the analyst left the settings page.
+
+    Streamlit garbage-collects the state of any widget that was not rendered on
+    the current run, and every page except the settings page renders none of
+    these inputs. Letting the widget be the storage meant a key survived
+    exactly until you navigated anywhere, which is the first thing anyone does
+    after pasting one.
+
+    The durable entry is an ordinary session value that nothing collects. This
+    renders a page that creates no key widgets at all, which is what every
+    other page does, and the key must still be there.
+    """
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app.page_history()\n"          # renders no key widgets whatsoever
+        "st.text(repr(sorted(app.session_keys().items())))\n",
+        **{"apikey:virustotal_api_key": "survives-navigation"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "[('virustotal_api_key', 'survives-navigation')]"
+
+
+def test_the_widget_and_the_durable_copy_are_separate_entries(monkeypatch):
+    """They must not share a key, or the collector takes both."""
+    from ui.app import _KEY_PREFIX, _STORE_PREFIX
+
+    assert _KEY_PREFIX != _STORE_PREFIX
+    assert not _KEY_PREFIX.startswith(_STORE_PREFIX), (
+        "a widget entry that also matches the store prefix would be read by "
+        "session_keys and collected by Streamlit"
+    )
+
+
+def test_typing_a_key_writes_it_to_the_durable_copy(monkeypatch):
+    """The widget's on_change callback is what makes the key outlive the page."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "st.session_state[app._KEY_PREFIX + 'groq_api_key'] = 'typed-in'\n"
+        "app._remember_field('groq_api_key')\n"
+        "st.text(st.session_state[app._STORE_PREFIX + 'groq_api_key'])\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "typed-in"
+
+
+def test_the_field_is_repopulated_from_the_durable_copy(monkeypatch):
+    """Coming back to the settings page must show the key still there."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app._seed_field('groq_api_key')\n"
+        "st.text(st.session_state[app._KEY_PREFIX + 'groq_api_key'])\n",
+        **{"apikey:groq_api_key": "remembered"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "remembered"
+
+
+def test_clearing_wipes_both_copies(monkeypatch):
+    """Clearing only the widget would let the durable copy put the key back on
+    the next render, which is worse than not clearing at all."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app._clear_keys()\n"
+        "st.text(repr(sorted(app.session_keys().items())))\n"
+        "st.text(st.session_state.get(app._KEY_PREFIX + 'virustotal_api_key', 'gone'))\n",
+        **{"apikey:virustotal_api_key": "durable",
+           "apikeyfield:virustotal_api_key": "widget"},
+    )
+    assert not at.exception
+    assert at.text[0].value == "[]"
+    assert at.text[1].value == ""

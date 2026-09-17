@@ -1164,9 +1164,18 @@ def page_search() -> None:
 
 # Keys supplied here live in st.session_state, which is server memory belonging
 # to one browser session. They are never written to disk, never shared with
-# another visitor, and gone when the session ends. The widget's `key` IS the
-# storage: there is deliberately no second copy to forget to clear.
-_KEY_PREFIX = "apikey:"
+# another visitor, and gone when the session ends.
+#
+# There are deliberately two entries per key, which looks redundant and is not.
+# Streamlit garbage-collects the state of any widget that was not rendered on
+# the current run, and every page except this one renders none of these inputs.
+# Letting the widget be the storage therefore meant a key survived exactly
+# until the analyst navigated anywhere, which is the first thing they do after
+# pasting one. `_STORE_PREFIX` is an ordinary session entry that nothing
+# collects; the widget is seeded from it on the way in and writes back to it on
+# change.
+_KEY_PREFIX = "apikeyfield:"     # the widget, which Streamlit may collect
+_STORE_PREFIX = "apikey:"        # the durable copy, which it may not
 
 # Providers the console can collect a key for when the API cannot be reached to
 # publish its own list. Kept minimal on purpose: the live catalogue from
@@ -1186,20 +1195,41 @@ _FALLBACK_PROVIDERS = [
 _LLM_SETTINGS = {"groq": "groq_api_key", "gemini": "google_api_key"}
 
 
-_PROVIDER_STATE = _KEY_PREFIX + "llm_provider"
+_PROVIDER_STATE = _STORE_PREFIX + "llm_provider"
+
+
+def _remember_field(setting: str) -> None:
+    """Copy a widget's value into the durable store.
+
+    Runs as an on_change callback, before the rerun that may collect the
+    widget, which is the whole reason the durable copy exists.
+    """
+    st.session_state[_STORE_PREFIX + setting] = \
+        st.session_state.get(_KEY_PREFIX + setting, "")
+
+
+def _seed_field(setting: str) -> None:
+    """Put the remembered value back into the widget before it is created."""
+    widget = _KEY_PREFIX + setting
+    if widget not in st.session_state:
+        st.session_state[widget] = st.session_state.get(_STORE_PREFIX + setting, "")
 
 
 def session_keys() -> dict[str, str]:
     """Credentials this browser session has supplied.
 
-    Excludes the language-model provider, which shares the same state prefix
-    but is a routing choice rather than a key. Counting it here would report
-    "1 key supplied" to a session that has supplied none.
+    Read from the durable store rather than the widgets, so the answer does not
+    depend on whether the settings page happens to be the one on screen. Every
+    caller of this is on some other page.
+
+    Excludes the language-model provider, which shares the prefix but is a
+    routing choice rather than a key. Counting it would report "1 key supplied"
+    to a session that has supplied none.
     """
     return {
-        name[len(_KEY_PREFIX):]: value.strip()
+        name[len(_STORE_PREFIX):]: value.strip()
         for name, value in st.session_state.items()
-        if name.startswith(_KEY_PREFIX) and name != _PROVIDER_STATE
+        if name.startswith(_STORE_PREFIX) and name != _PROVIDER_STATE
         and isinstance(value, str) and value.strip()
     }
 
@@ -1266,7 +1296,7 @@ def _clear_keys() -> None:
     is the point, not an accident.
     """
     for name in list(st.session_state.keys()):
-        if name.startswith(_KEY_PREFIX):
+        if name.startswith(_KEY_PREFIX) or name.startswith(_STORE_PREFIX):
             st.session_state[name] = ""
     st.session_state.pop("key_results", None)
 
@@ -1329,9 +1359,11 @@ def page_settings() -> None:
         st.subheader("Intelligence sources")
         for provider in intel:
             setting = provider["setting"]
+            _seed_field(setting)
             st.text_input(
                 provider["name"],
                 key=_KEY_PREFIX + setting,
+                on_change=_remember_field, args=(setting,),
                 type="password",
                 placeholder=("Using this deployment's key"
                              if provider.get("server_configured")
@@ -1351,9 +1383,11 @@ def page_settings() -> None:
         st.caption("Optional. Risk scores, framework mappings and remediation "
                    "are computed without it; a model writes the narrative "
                    "around them.")
+        _seed_field("llm_provider")
         provider_choice = st.selectbox(
             "Provider", ["none", "groq", "gemini"],
             key=_KEY_PREFIX + "llm_provider",
+            on_change=_remember_field, args=("llm_provider",),
             format_func=lambda v: {"none": "No language model",
                                    "groq": "Groq", "gemini": "Google Gemini"}[v],
             help="Pick the provider your key belongs to. A Gemini key is inert "
@@ -1362,9 +1396,11 @@ def page_settings() -> None:
         )
         for name, setting in _LLM_SETTINGS.items():
             if provider_choice == name:
+                _seed_field(setting)
                 st.text_input(
                     f"{name.title()} API key",
                     key=_KEY_PREFIX + setting, type="password",
+                    on_change=_remember_field, args=(setting,),
                     placeholder="Paste your key",
                 )
                 if supplied.get(setting):
