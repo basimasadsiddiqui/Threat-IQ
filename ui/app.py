@@ -176,8 +176,19 @@ def sev_color(name: str) -> str:
 
 @st.cache_resource(show_spinner=False)
 def _embedded_api() -> str:
-    """Start the API in this process, once per app run. See ui/embedded.py."""
-    from ui.embedded import start_backend
+    """Start the API in this process, once per app run. See ui/embedded.py.
+
+    Imported two ways because the module's name depends on how the app was
+    launched. `streamlit run ui/app.py` puts the script's own directory on
+    sys.path and not the repo root, so the sibling is plain `embedded` and
+    `ui.embedded` does not resolve at all. Running through `python -m streamlit`
+    additionally puts the working directory there, which makes `ui.embedded`
+    work and hides the difference; that is exactly how this shipped broken once.
+    """
+    try:
+        from ui.embedded import start_backend
+    except ModuleNotFoundError:
+        from embedded import start_backend  # type: ignore[no-redef]
     return start_backend()
 
 

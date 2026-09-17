@@ -121,3 +121,63 @@ def test_the_api_really_answers_over_http():
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert base.startswith("http://127.0.0.1:"), "must not bind a public address"
+
+
+def test_embedded_is_importable_the_way_streamlit_launches_the_app():
+    """`streamlit run ui/app.py` puts ui/ on sys.path, NOT the repo root.
+
+    So the sibling module is plain `embedded`, and `ui.embedded` does not
+    resolve. Running through `python -m streamlit` also puts the working
+    directory on sys.path, which makes the package path work and hides the
+    difference. That is the gap this shipped through: every local check used
+    `-m`, and the deployed host does not.
+
+    A subprocess with a hand-built sys.path is the only honest way to assert
+    it, since this test session already has the repo root importable.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    ui_dir = Path(__file__).resolve().parents[1] / "ui"
+    # Exactly what streamlit arranges: the script's directory, and no repo root.
+    code = (
+        f"import sys; sys.path.insert(0, {str(ui_dir)!r})\n"
+        "from embedded import start_backend\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, cwd="/", timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"embedded.py is not importable as streamlit imports it:\n"
+        f"{result.stderr[-1500:]}"
+    )
+    assert "ok" in result.stdout
+
+
+def test_the_app_resolves_its_backend_import_either_way():
+    """The console must start its backend under both launch styles."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    for path_entry, label in ((root / "ui", "streamlit run"), (root, "python -m")):
+        code = (
+            f"import sys; sys.path.insert(0, {str(path_entry)!r})\n"
+            "try:\n"
+            "    from ui.embedded import start_backend\n"
+            "except ModuleNotFoundError:\n"
+            "    from embedded import start_backend\n"
+            "print('ok')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, cwd="/", timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"the {label} launch style cannot import the backend:\n"
+            f"{result.stderr[-1500:]}"
+        )
