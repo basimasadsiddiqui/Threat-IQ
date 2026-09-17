@@ -42,6 +42,11 @@ class Probe:
     # Optional means ThreatIQ already works without it, the key only widens
     # coverage or raises a quota.
     optional: bool = False
+    # For providers whose URL lists models: the response is searched for the
+    # model this deployment is configured to call. A key can be perfectly valid
+    # against a model that has been retired, and then every request 404s while
+    # the key itself tests clean.
+    model_setting: str | None = None
 
     def headers(self, key: str) -> dict[str, str]:
         return {self.auth_header: self.auth_template.format(key=key),
@@ -96,6 +101,7 @@ PROBES: tuple[Probe, ...] = (
         auth_header="Authorization",
         auth_template="Bearer {key}",
         optional=True,
+        model_setting="groq_model",
     ),
     Probe(
         # Header auth rather than the ?key= form Google also accepts: a key in a
@@ -157,8 +163,36 @@ def _classify(probe: Probe, status_code: int) -> KeyCheck:
     )
 
 
-async def check_one(client: httpx.AsyncClient, probe: Probe,
-                    key: str) -> KeyCheck:
+def _model_is_offered(probe: Probe, response: httpx.Response,
+                      model: str) -> KeyCheck | None:
+    """Reject a good key pointed at a model the provider no longer serves.
+
+    Checking only that the key is accepted answers the wrong question. Providers
+    retire models, and when they do, `/models` keeps returning 200 for the key
+    while every completion returns 404. The console then reports the language
+    model as configured and working, the pipeline silently takes its
+    deterministic branch on every call, and the only trace is a log line nobody
+    is reading. That is the same failure this module exists to catch, one level
+    further in: present, accepted, and not actually usable.
+    """
+    if not model:
+        return None
+    try:
+        offered = {m.get("id") for m in response.json().get("data", [])}
+    except ValueError:
+        return None          # not the JSON we expected; let the status stand
+    if not offered or model in offered:
+        return None
+    return KeyCheck(
+        name=probe.name, setting=probe.setting, state="rejected",
+        detail=(f"key accepted, but the configured model {model!r} is not one "
+                f"this provider offers, so every call would fail"),
+        optional=probe.optional, signup=probe.signup, unlocks=probe.unlocks,
+    )
+
+
+async def check_one(client: httpx.AsyncClient, probe: Probe, key: str,
+                    model: str = "") -> KeyCheck:
     """Probe one provider. Never raises, and never returns the key."""
     if not key or not key.strip():
         return _absent(probe)
@@ -177,18 +211,28 @@ async def check_one(client: httpx.AsyncClient, probe: Probe,
             detail=f"could not reach the service ({type(exc).__name__})",
             optional=probe.optional, signup=probe.signup, unlocks=probe.unlocks,
         )
-    return _classify(probe, response.status_code)
+    verdict = _classify(probe, response.status_code)
+    if verdict.state == "ok" and probe.model_setting:
+        return _model_is_offered(probe, response, model) or verdict
+    return verdict
 
 
 async def check_keys(keys: dict[str, str],
-                     probes: tuple[Probe, ...] = PROBES) -> list[KeyCheck]:
+                     probes: tuple[Probe, ...] = PROBES,
+                     models: dict[str, str] | None = None) -> list[KeyCheck]:
     """Check every probe against the supplied keys, concurrently.
 
     Providers are unrelated to each other, so one slow or unreachable service
     must not decide how long the whole settings page takes.
+
+    `models` maps a Settings field name to the model configured for it, so a
+    provider that lists its models can be asked whether the one this deployment
+    would actually call still exists.
     """
+    models = models or {}
     async with httpx.AsyncClient(follow_redirects=True) as client:
         return list(await asyncio.gather(*(
-            check_one(client, probe, keys.get(probe.setting, ""))
+            check_one(client, probe, keys.get(probe.setting, ""),
+                      models.get(probe.model_setting or "", ""))
             for probe in probes
         )))

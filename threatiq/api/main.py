@@ -205,7 +205,13 @@ async def test_keys(
     """
     supplied = body.resolved_overrides()
     server = get_settings()
-    results = await check_keys(supplied)
+    # Which model each provider would actually be called with, so a valid key
+    # aimed at a retired model is reported as broken rather than as working.
+    effective = server.with_overrides(supplied)
+    results = await check_keys(supplied, models={
+        "groq_model": effective.groq_model,
+        "gemini_model": effective.gemini_model,
+    })
     return {"results": [
         {
             "name": r.name,

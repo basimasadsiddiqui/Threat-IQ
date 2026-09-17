@@ -43,7 +43,10 @@ async def main() -> int:
     print("Checking configured API keys\n")
 
     keys = {p.setting: getattr(settings, p.setting, "") for p in PROBES}
-    results = await check_keys(keys)
+    results = await check_keys(keys, models={
+        "groq_model": settings.groq_model,
+        "gemini_model": settings.gemini_model,
+    })
 
     failures = 0
     for result in results:

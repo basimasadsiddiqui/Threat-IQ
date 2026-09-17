@@ -408,3 +408,56 @@ def test_no_probe_puts_a_key_in_a_query_string():
     headers. Google accepts `?key=`; this uses the header form instead."""
     for probe in PROBES:
         assert "key=" not in probe.url.lower(), probe.name
+
+
+# ------------------------------------------- a valid key on a retired model
+
+@pytest.mark.asyncio
+async def test_a_key_aimed_at_a_retired_model_is_reported_as_broken(monkeypatch):
+    """Checking only that the key is accepted answers the wrong question.
+
+    Providers retire models. When they do, /models keeps returning 200 for the
+    key while every completion returns 404, so the console reports the language
+    model as working, the pipeline silently takes its deterministic branch on
+    every call, and the only trace is a log line nobody reads. This happened:
+    llama-3.3-70b-versatile was withdrawn from Groq and the settings page went
+    on reporting the key as accepted.
+    """
+    groq = PROBES_BY_SETTING["groq_api_key"]
+
+    async def fake_get(self, url, headers=None, timeout=None):
+        return httpx.Response(
+            status_code=200,
+            json={"data": [{"id": "openai/gpt-oss-120b"}, {"id": "whisper-large-v3"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    async with httpx.AsyncClient() as client:
+        gone = await check_one(client, groq, "valid-key", "llama-3.3-70b-versatile")
+        live = await check_one(client, groq, "valid-key", "openai/gpt-oss-120b")
+
+    assert gone.state == "rejected", "a withdrawn model must not report as working"
+    assert "not one this provider offers" in gone.detail
+    assert live.state == "ok"
+
+
+@pytest.mark.asyncio
+async def test_the_model_check_does_not_fire_without_a_configured_model(monkeypatch):
+    """Checking the key alone stays valid when no model name is in play."""
+    groq = PROBES_BY_SETTING["groq_api_key"]
+
+    async def fake_get(self, url, headers=None, timeout=None):
+        return httpx.Response(
+            status_code=200, json={"data": [{"id": "something-else"}]},
+            request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    async with httpx.AsyncClient() as client:
+        assert (await check_one(client, groq, "valid-key", "")).state == "ok"
+
+
+def test_the_default_groq_model_is_one_groq_still_serves():
+    """Pins the fix. llama-3.3-70b-versatile was the default and is withdrawn;
+    every narrative in the system silently stopped being written."""
+    assert get_settings().groq_model != "llama-3.3-70b-versatile"

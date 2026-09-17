@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # --- LLM ---
     llm_provider: Literal["groq", "gemini", "none"] = "groq"
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     google_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
     llm_temperature: float = 0.1
