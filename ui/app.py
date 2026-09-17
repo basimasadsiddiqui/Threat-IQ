@@ -52,8 +52,11 @@ TIMEOUT = float(setting("THREATIQ_TIMEOUT", "300"))
 # only one: see ui/embedded.py. The console cannot tell the difference, which
 # is the point, it speaks HTTP either way.
 _CONFIGURED_API = setting("THREATIQ_API_URL")
-_EMBED_API = setting("THREATIQ_EMBED_API").lower() in ("1", "true", "yes")
-_FALLBACK_API = "http://localhost:8000"
+# 127.0.0.1, not localhost: on some hosts localhost resolves to ::1 with no
+# IPv6 loopback configured, and the connection fails with "cannot assign
+# requested address" rather than a plain refusal, which reads like a bug in the
+# console rather than an absent backend.
+_FALLBACK_API = "http://127.0.0.1:8000"
 
 # Single source of truth for severity presentation. `rank` drives every sort in
 # this file; `color` matches the ramp in .streamlit/config.toml.
@@ -178,6 +181,19 @@ def _embedded_api() -> str:
     return start_backend()
 
 
+@st.cache_resource(show_spinner=False)
+def _local_api_is_running() -> bool:
+    """Is a separately-started API already listening on the default port?
+
+    Cached: this is a property of how the process was launched, and it must not
+    be re-probed on every rerun.
+    """
+    try:
+        return httpx.get(f"{_FALLBACK_API}/health", timeout=2.0).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
 def API_BASE() -> str:  # noqa: N802  # reads as a constant at every call site
     """Where the API is.
 
@@ -185,12 +201,24 @@ def API_BASE() -> str:  # noqa: N802  # reads as a constant at every call site
     few seconds to come up and reports progress through Streamlit, which cannot
     be touched before st.set_page_config has run; doing this at module level
     put a spinner ahead of it and the app refused to start.
+
+    The order is: an address someone configured, then a separately-started API
+    on the default port, then one started in this process.
+
+    That last fallback is why the flag is not required. Asking a host to set
+    THREATIQ_EMBED_API made a forgotten checkbox present as "Cannot reach the
+    ThreatIQ API at localhost:8000", which describes the symptom and hides the
+    cause: there is no second process on a host that only runs one, and there
+    never was going to be. Rather than demand the operator know that, the
+    console looks for a backend and starts its own when there is none.
     """
     if _CONFIGURED_API:
         return _CONFIGURED_API
-    if _EMBED_API:
+    if setting("THREATIQ_EMBED_API").lower() in ("1", "true", "yes"):
         return _embedded_api()
-    return _FALLBACK_API
+    if _local_api_is_running():
+        return _FALLBACK_API
+    return _embedded_api()
 
 
 def _headers() -> dict[str, str]:

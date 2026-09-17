@@ -910,3 +910,61 @@ def test_no_orphaned_palette_tables_remain():
 
     assert not hasattr(threat_graph, "_NODE_COLORS")
     assert not hasattr(threat_graph, "_TYPE_SHAPES")
+
+
+def test_the_console_starts_its_own_api_when_none_is_running(monkeypatch):
+    """A single-process host must work without being told it is one.
+
+    Requiring THREATIQ_EMBED_API meant a forgotten secret presented as "Cannot
+    reach the ThreatIQ API at localhost:8000", which names the symptom and
+    hides the cause: on a host that runs one process there is no second one to
+    reach, and there never was going to be. The console looks for a backend and
+    starts its own when there is none.
+    """
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app._CONFIGURED_API = ''\n"
+        "app._local_api_is_running = lambda: False\n"
+        "app._embedded_api = lambda: 'http://127.0.0.1:41234'\n"
+        "st.text(app.API_BASE())\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "http://127.0.0.1:41234"
+
+
+def test_a_separately_started_api_is_preferred_over_embedding(monkeypatch):
+    """The documented two-process workflow must not start a second engine."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app._CONFIGURED_API = ''\n"
+        "app._local_api_is_running = lambda: True\n"
+        "app._embedded_api = lambda: 'SHOULD-NOT-BE-CALLED'\n"
+        "st.text(app.API_BASE())\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "http://127.0.0.1:8000"
+
+
+def test_a_configured_address_wins_over_everything(monkeypatch):
+    """Compose sets this, and it must not be second-guessed by a probe."""
+    at = _run_with_session(
+        monkeypatch,
+        "import ui.app as app\n"
+        "app._CONFIGURED_API = 'http://api:8000'\n"
+        "app._local_api_is_running = lambda: True\n"
+        "app._embedded_api = lambda: 'SHOULD-NOT-BE-CALLED'\n"
+        "st.text(app.API_BASE())\n",
+    )
+    assert not at.exception
+    assert at.text[0].value == "http://api:8000"
+
+
+def test_the_fallback_address_is_not_the_localhost_alias():
+    """localhost resolves to ::1 on some hosts with no IPv6 loopback, and the
+    connection then fails with "cannot assign requested address", which reads
+    as a bug in the console rather than an absent backend."""
+    from ui.app import _FALLBACK_API
+
+    assert _FALLBACK_API == "http://127.0.0.1:8000"
