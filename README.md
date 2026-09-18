@@ -213,28 +213,28 @@ so plain HTTP hands both to anyone on the path.
 
 ```mermaid
 flowchart TD
-    IN([URL · domain · IP · file hash · CVE · whole email]) --> ORC
+    IN(["URL, domain, IP, file hash, CVE, or a whole email"]) --> ORC
 
-    ORC[["orchestrator<br/>classify · extract IOCs · choose specialists"]]
+    ORC[["orchestrator: classify, extract IOCs, choose specialists"]]
 
-    ORC -->|mandatory per input kind| TI[threat intel]
-    ORC -->|mandatory per input kind| PH[phishing / BEC]
-    ORC -->|mandatory per input kind| VU[vulnerability]
-    ORC -.->|opt-in, twice gated| WS[websec / active scan]
+    ORC -->|"mandatory per input kind"| TI["threat intel"]
+    ORC -->|"mandatory per input kind"| PH["phishing / BEC"]
+    ORC -->|"mandatory per input kind"| VU["vulnerability"]
+    ORC -.->|"opt-in, twice gated"| WS["websec: active scan"]
 
-    TI --- TIT["VirusTotal · AbuseIPDB<br/>urlscan · DNS · RDAP · HTTP"]
-    PH --- PHT["email headers<br/>lookalike · BEC patterns"]
-    VU --- VUT["NVD · CISA KEV"]
+    TI --- TIT["VirusTotal, AbuseIPDB, urlscan, DNS, RDAP, HTTP"]
+    PH --- PHT["email headers, lookalike, BEC patterns"]
+    VU --- VUT["NVD, CISA KEV"]
 
     TI --> COR
     PH --> COR
     VU --> COR
     WS --> COR
 
-    COR[correlation<br/>threat graph · campaign linkage · dedup] --> RISK
-    RISK[["risk engine<br/>deterministic 0-100, 7 weighted factors"]] --> CMP
-    CMP[compliance mapper<br/>RAG-grounded OWASP / CWE / MITRE / NIST] --> REM
-    REM[remediation<br/>playbook, prioritised] --> REP([report])
+    COR["correlation: threat graph, campaign linkage, dedup"] --> RISK
+    RISK[["risk engine: deterministic 0-100, 7 weighted factors"]] --> CMP
+    CMP["compliance mapper: RAG-grounded OWASP, CWE, MITRE, NIST"] --> REM
+    REM["remediation: playbook, prioritised"] --> REP(["report"])
 
     classDef det fill:#141b23,stroke:#2f6fd8,stroke-width:2px,color:#e6edf3
     classDef agent fill:#141b23,stroke:#243040,color:#e6edf3
