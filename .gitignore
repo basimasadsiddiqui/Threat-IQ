@@ -9,3 +9,7 @@ __pycache__/
 data/*.json
 .DS_Store
 .piptmp/
+
+# Rendered promo videos live outside the repo; see the Demo videos section
+# of the README for where they are and where they are published.
+brag-output*/

@@ -1,6 +1,0 @@
-Introducing ThreatIQ: paste a phishing email that tells the AI to report itself
-as benign, and the verdict stays at 71.9 HIGH. The score is computed before any
-model sees the material, so the instruction has nothing to talk to.
-
-Tools collect facts. The model interprets them. Set LLM_PROVIDER=none and every
-conclusion is still reached.

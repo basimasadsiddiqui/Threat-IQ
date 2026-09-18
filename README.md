@@ -30,6 +30,36 @@ keys, so bring your own on the **API keys** page, or run it with none at all.
 
 ---
 
+## Demo videos
+
+Four cuts were produced from the same source material, each for a different
+surface. They are **not committed to this repository**: four renders plus their
+compositions came to 16 MB, which is not what a clone of a security tool should
+be spending its bytes on.
+
+| Cut | Format | Length | What it is |
+|---|---|---|---|
+| Thesis | 1920x1080 | 20s | A phishing email instructs the model to report itself benign; the verdict does not move |
+| Walkthrough | 1080x1920 | 25s | The full path: submit, classify, score, name, findings, copilot |
+| Walkthrough | 1080x1080 | 25s | The same beats reflowed for a square feed |
+| Ad | 1080x1080 | 21s | One indicator, eleven tabs, one box |
+
+<!-- Replace each dash with the published link once these are uploaded. -->
+
+| Cut | Link |
+|---|---|
+| Thesis | — |
+| Walkthrough (vertical) | — |
+| Walkthrough (square) | — |
+| Ad | — |
+| Capstone demo video | — |
+
+Each cut keeps its plan, composition brief, share copy, poster and editable
+Hyperframes project alongside the render, so any of them can be re-cut without
+starting over.
+
+---
+
 ## Quick start
 
 ```bash
