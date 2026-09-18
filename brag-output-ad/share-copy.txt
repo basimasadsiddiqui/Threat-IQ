@@ -1,0 +1,12 @@
+One indicator used to mean eleven tabs.
+
+ThreatIQ takes a URL, domain, IP, file hash, CVE or a whole phishing email,
+routes it deterministically to four specialist agents across fifteen tools, and
+returns a scored, framework-mapped report with the remediation already ranked.
+
+The number I am proudest of is not the score. It is "scored on 56% of the
+model's weight" — when a source cannot be reached, ThreatIQ reports the gap
+instead of quietly scoring it as zero. A failed lookup is not evidence of safety.
+
+Nine of the fifteen tools need no API key, so it works the moment you open it:
+threat-iq-project.streamlit.app

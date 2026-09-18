@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      /* Palette lifted from the project's .streamlit/config.toml. */
+      :root {
+        --bg: #0b0f14;
+        --panel: #141b23;
+        --border: #243040;
+        --ink: #e6edf3;
+        --muted: #9aa6b2;
+        --accent: #2f6fd8;
+        --critical: #ea5459;
+        --high: #f76808;
+        --low: #46a758;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      }
+
+      html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+      #root {
+        width: 100%; height: 100%; position: relative;
+        background: var(--bg); font-family: var(--sans); color: var(--ink);
+      }
+      .clip { position: absolute; inset: 0; }
+
+      /* Persistent chrome so the frame reads as one product, not six slides. */
+      #chrome {
+        position: absolute; top: 74px; left: 76px;
+        display: flex; align-items: center; gap: 16px;
+      }
+      #cdiamond {
+        width: 22px; height: 22px; background: var(--accent);
+        transform: rotate(45deg); border-radius: 2px;
+      }
+      #cname { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+      #csub { font-size: 20px; color: var(--muted); margin-left: 4px; }
+
+      .col { position: absolute; left: 76px; width: 928px; }
+
+      /* ------------------------------------------------ scene 1: the box */
+      #s1 { top: 560px; }
+      #s1 h1 {
+        font-size: 74px; font-weight: 700; letter-spacing: -0.03em;
+        line-height: 1.12; margin-bottom: 52px; opacity: 0;
+      }
+      .card {
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 10px; padding: 40px 42px;
+      }
+      .fieldlabel { font-size: 26px; color: var(--muted); margin-bottom: 24px; }
+      #field {
+        border: 1px solid var(--border); border-radius: 6px;
+        background: #0e141b; padding: 28px 30px;
+        font-family: var(--mono); font-size: 32px; color: var(--ink);
+        display: flex; align-items: center; min-height: 92px;
+      }
+      #typed { white-space: nowrap; overflow: hidden; width: 0; }
+      #caret {
+        width: 3px; height: 40px; background: var(--accent); margin-left: 4px;
+      }
+      #btn {
+        margin-top: 34px; background: var(--accent); color: #fff;
+        border-radius: 6px; padding: 30px 0; text-align: center;
+        font-size: 34px; font-weight: 600; letter-spacing: 0.01em;
+      }
+
+      /* ------------------------------------------------- scene 2: it runs */
+      #chip {
+        margin-top: 34px; font-size: 26px; color: var(--muted); opacity: 0;
+      }
+      #chip b { color: var(--ink); font-weight: 600; }
+      #chip .ind { font-family: var(--mono); color: var(--low); }
+      #pills { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 16px; }
+      .pill {
+        border: 1px solid var(--border); border-radius: 999px;
+        padding: 16px 30px; font-size: 25px; color: var(--muted); opacity: 0;
+      }
+
+      /* --------------------------------------- scene 3: verdict and name */
+      #s3 { top: 430px; opacity: 0; }
+      #score { font-size: 250px; font-weight: 700; letter-spacing: -0.05em; color: var(--high); line-height: 1; }
+      #outof { font-size: 58px; font-weight: 500; color: var(--muted); margin-left: 14px; }
+      #sev {
+        display: inline-block; margin-top: 26px; padding: 12px 26px;
+        background: rgba(247,104,8,0.16); color: var(--high);
+        border: 1px solid rgba(247,104,8,0.45); border-radius: 5px;
+        font-size: 30px; font-weight: 700; letter-spacing: 0.14em;
+      }
+      #nameWrap { margin-top: 56px; opacity: 0; }
+      #nameLabel {
+        font-size: 22px; letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--muted); font-weight: 600; margin-bottom: 18px;
+      }
+      #invname {
+        font-size: 48px; font-weight: 600; letter-spacing: -0.02em;
+        white-space: nowrap; overflow: hidden; width: 0;
+      }
+      #invid { margin-top: 16px; font-family: var(--mono); font-size: 24px; color: var(--muted); opacity: 0; }
+
+      /* ------------------------------------------- scene 4: what it found */
+      #s4 { top: 1010px; }
+      .finding {
+        display: flex; gap: 26px; align-items: flex-start;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 8px; padding: 30px 34px; margin-bottom: 22px; opacity: 0;
+      }
+      .rail { width: 7px; border-radius: 4px; align-self: stretch; }
+      .rail.crit { background: var(--critical); }
+      .rail.high { background: var(--high); }
+      .fsev { font-size: 21px; font-weight: 700; letter-spacing: 0.14em; margin-bottom: 10px; }
+      .fsev.crit { color: var(--critical); }
+      .fsev.high { color: var(--high); }
+      .ftitle { font-size: 32px; font-weight: 500; }
+      #cov { margin-top: 30px; font-size: 30px; color: var(--muted); opacity: 0; }
+      #covnote { margin-top: 12px; font-size: 23px; color: var(--muted); opacity: 0; }
+
+      /* -------------------------------------------- scene 5: the copilot */
+      #s5 { top: 470px; opacity: 0; }
+      #copilotBtn {
+        background: var(--accent); color: #fff; border-radius: 6px;
+        padding: 28px 0; text-align: center; font-size: 32px; font-weight: 600;
+      }
+      .bubble {
+        border-radius: 10px; padding: 30px 34px; margin-top: 34px;
+        font-size: 31px; line-height: 1.45; opacity: 0;
+      }
+      .bubble.q {
+        background: rgba(47,111,216,0.16); border: 1px solid rgba(47,111,216,0.42);
+        margin-left: 220px;
+      }
+      .bubble.a { background: var(--panel); border: 1px solid var(--border); margin-right: 120px; }
+      #ansText { overflow: hidden; }
+      #cites {
+        margin-top: 20px; font-family: var(--mono); font-size: 23px;
+        color: var(--muted); opacity: 0;
+      }
+
+      /* ---------------------------------------------------- scene 6: rule */
+      #outro {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; text-align: center; padding: 0 90px;
+      }
+      #rule {
+        font-size: 74px; font-weight: 600; letter-spacing: -0.025em;
+        line-height: 1.24; opacity: 0;
+      }
+      #omark { margin-top: 90px; display: flex; align-items: center; gap: 20px; opacity: 0; }
+      #odiamond { width: 30px; height: 30px; background: var(--accent); transform: rotate(45deg); border-radius: 3px; }
+      #oname { font-size: 50px; font-weight: 700; letter-spacing: -0.02em; }
+      #ourl { margin-top: 26px; font-family: var(--mono); font-size: 27px; color: var(--accent); opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="25"
+         data-width="1080" data-height="1920">
+
+      <!-- ===================================== the console, scenes 1-5 -->
+      <div id="stage" class="clip" data-start="0" data-duration="21.7" data-track-index="0">
+        <div id="chrome" style="opacity: 0">
+          <div id="cdiamond"></div>
+          <div id="cname">ThreatIQ</div>
+          <div id="csub">Analyst console</div>
+        </div>
+
+        <!-- scene 1 + 2 share the input card -->
+        <div id="s1" class="col">
+          <h1 id="hook">Paste anything<br />suspicious.</h1>
+          <div class="card" id="inputCard" style="opacity: 0">
+            <div class="fieldlabel">
+              URL, domain, IP address, file hash, CVE, or a full email message
+            </div>
+            <div id="field">
+              <span id="typed">paypa1-secure-login.tk</span><span id="caret"></span>
+            </div>
+            <div id="btn">Investigate</div>
+          </div>
+          <div id="chip">
+            Classified as <b>domain</b> &middot; 1 indicator:
+            <span class="ind">paypa1-secure-login.tk</span>
+          </div>
+          <div id="pills">
+            <div class="pill" id="p1">orchestrator</div>
+            <div class="pill" id="p2">threat intel</div>
+            <div class="pill" id="p3">phishing</div>
+            <div class="pill" id="p4">correlation</div>
+          </div>
+        </div>
+
+        <!-- scene 3: the verdict and the investigation's own name -->
+        <div id="s3" class="col">
+          <div><span id="score">66.9</span><span id="outof">/ 100</span></div>
+          <div id="sev">HIGH</div>
+          <div id="nameWrap">
+            <div id="nameLabel">Investigation</div>
+            <div id="invname">paypa1-secure-login.tk - phishing</div>
+            <div id="invid">Investigation 8c3f262643f3</div>
+          </div>
+        </div>
+
+        <!-- scene 4: findings and the coverage honesty beat -->
+        <div id="s4" class="col">
+          <div class="finding" id="f1">
+            <div class="rail crit"></div>
+            <div>
+              <div class="fsev crit">CRITICAL</div>
+              <div class="ftitle">Brand impersonation domain</div>
+            </div>
+          </div>
+          <div class="finding" id="f2">
+            <div class="rail high"></div>
+            <div>
+              <div class="fsev high">HIGH</div>
+              <div class="ftitle">Malicious indicator</div>
+            </div>
+          </div>
+          <div id="cov">Scored on 56% of the model's weight</div>
+          <div id="covnote">missing coverage is reported, never scored as zero</div>
+        </div>
+
+        <!-- scene 5: straight into the copilot -->
+        <div id="s5" class="col">
+          <div id="copilotBtn">Ask the Copilot how to fix this</div>
+          <div class="bubble q" id="qb">How do I fix this?</div>
+          <div class="bubble a" id="ab">
+            <div id="ansText">
+              Block paypa1-secure-login.tk at the web proxy, DNS resolver and mail
+              gateway.
+            </div>
+            <div id="cites">T1566 &middot; T1583.001</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================================================== scene 6 -->
+      <div id="outro" class="clip" data-start="21.5" data-duration="3.5" data-track-index="1">
+        <div id="rule">Tools collect facts.<br />The model interprets them.</div>
+        <div id="omark"><div id="odiamond"></div><div id="oname">ThreatIQ</div></div>
+        <div id="ourl">threat-iq-project.streamlit.app</div>
+      </div>
+
+      <!-- ======================================================= audio -->
+      <audio id="bed" data-start="0" data-duration="25" data-volume="1" data-track-index="2"
+             src="assets/music/happy-beats-business-moves-vol-9-by-ende-dot-app.mp3"></audio>
+
+      <audio id="sfx-t1" data-start="1.70" data-duration="0.4" data-volume="0.26" data-track-index="3" src="assets/sfx/keypress-002.wav"></audio>
+      <audio id="sfx-t2" data-start="2.15" data-duration="0.4" data-volume="0.22" data-track-index="3" src="assets/sfx/keypress-005.wav"></audio>
+      <audio id="sfx-t3" data-start="2.60" data-duration="0.4" data-volume="0.22" data-track-index="3" src="assets/sfx/keypress-007.wav"></audio>
+      <!-- submit, beat-locked 4.23s -->
+      <audio id="sfx-submit" data-start="4.23" data-duration="0.5" data-volume="0.34" data-track-index="3" src="assets/sfx/click1.ogg"></audio>
+      <audio id="sfx-p1" data-start="5.55" data-duration="0.4" data-volume="0.16" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <audio id="sfx-p2" data-start="6.00" data-duration="0.4" data-volume="0.16" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <audio id="sfx-p3" data-start="6.45" data-duration="0.4" data-volume="0.16" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <audio id="sfx-p4" data-start="6.90" data-duration="0.4" data-volume="0.16" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <!-- the score, beat-locked 7.92s -->
+      <audio id="sfx-score" data-start="7.92" data-duration="1.2" data-volume="0.34" data-track-index="3" src="assets/sfx/impactSoft_heavy_001.ogg"></audio>
+      <!-- findings, beat-grid 12.65 / 13.70 -->
+      <audio id="sfx-f1" data-start="12.65" data-duration="0.5" data-volume="0.2" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <audio id="sfx-f2" data-start="13.70" data-duration="0.5" data-volume="0.2" data-track-index="3" src="assets/sfx/bong_001.ogg"></audio>
+      <!-- copilot tap, beat-locked 17.91s -->
+      <audio id="sfx-tap" data-start="17.91" data-duration="0.5" data-volume="0.32" data-track-index="3" src="assets/sfx/click1.ogg"></audio>
+      <audio id="sfx-a1" data-start="19.20" data-duration="0.4" data-volume="0.18" data-track-index="3" src="assets/sfx/keypress-005.wav"></audio>
+      <audio id="sfx-a2" data-start="19.65" data-duration="0.4" data-volume="0.16" data-track-index="3" src="assets/sfx/keypress-002.wav"></audio>
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // The bed level lives on the timeline: a GSAP volume tween REPLACES the
+      // element gain rather than scaling it, so mixing the two makes the level
+      // jump to full wherever the tween starts.
+      tl.set("#bed", { volume: 0.24 }, 0);
+
+      /* ------------------------------------------------ scene 1: the box */
+      tl.to("#chrome", { opacity: 1, duration: 0.4 }, 0.2);
+      tl.fromTo("#hook", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.55 }, 0.35);
+      tl.fromTo("#inputCard", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.5 }, 0.95);
+      // The indicator types itself: a width reveal on a nowrap mono span is
+      // seek-safe, unlike a JS character loop.
+      tl.to("#typed", { width: 470, duration: 1.15, ease: "none" }, 1.62);
+      // Caret stops blinking once the value is committed.
+      tl.to("#caret", { opacity: 0, duration: 0.2 }, 3.05);
+
+      /* ------------------------------------------------- scene 2: it runs */
+      // beat-locked: 4.23s — the submit press.
+      tl.to("#btn", { scale: 0.975, duration: 0.09 }, 4.23);
+      tl.to("#btn", { scale: 1, duration: 0.16 }, 4.32);
+      tl.to("#chip", { opacity: 1, duration: 0.38 }, 4.66);
+      // Four agent pills, one per half-beat, showing this is a graph not a call.
+      tl.fromTo("#p1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.26 }, 5.55);
+      tl.fromTo("#p2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.26 }, 6.00);
+      tl.fromTo("#p3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.26 }, 6.45);
+      tl.fromTo("#p4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.26 }, 6.90);
+
+      /* --------------------------------------- scene 3: verdict and name */
+      tl.to("#s1", { opacity: 0, duration: 0.34 }, 7.42);
+      // beat-locked: 7.92s — the verdict lands.
+      tl.to("#s3", { opacity: 1, duration: 0.01 }, 7.9);
+      tl.fromTo("#score", { opacity: 0, y: 28, scale: 0.94 },
+                { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "power3.out" }, 7.92);
+      tl.fromTo("#sev", { opacity: 0 }, { opacity: 1, duration: 0.34 }, 8.22);
+      // beat-locked: 8.44s — the investigation names itself.
+      tl.to("#nameWrap", { opacity: 1, duration: 0.3 }, 8.44);
+      tl.to("#invname", { width: 830, duration: 0.85, ease: "none" }, 8.6);
+      tl.to("#invid", { opacity: 1, duration: 0.35 }, 9.62);
+      // Held to 12.6: the name is the point of this scene, let it be read.
+
+      /* ------------------------------------------- scene 4: what it found */
+      // beat-grid: 12.65s, 13.70s — every other beat (1.05s apart). Consecutive
+      // beats at 114.84 BPM are 0.52s apart, which outruns reading a card.
+      tl.fromTo("#f1", { opacity: 0, x: 26 }, { opacity: 1, x: 0, duration: 0.4 }, 12.65);
+      tl.fromTo("#f2", { opacity: 0, x: 26 }, { opacity: 1, x: 0, duration: 0.4 }, 13.70);
+      tl.to("#cov", { opacity: 1, duration: 0.4 }, 14.76);
+      tl.to("#covnote", { opacity: 1, duration: 0.4 }, 15.25);
+
+      /* -------------------------------------------- scene 5: the copilot */
+      tl.to(["#s3", "#s4"], { opacity: 0, duration: 0.38 }, 17.15);
+      tl.to("#s5", { opacity: 1, duration: 0.01 }, 17.5);
+      tl.fromTo("#copilotBtn", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.4 }, 17.52);
+      // beat-locked: 17.91s — the tap.
+      tl.to("#copilotBtn", { scale: 0.975, duration: 0.09 }, 17.91);
+      tl.to("#copilotBtn", { scale: 1, duration: 0.16 }, 18.0);
+      tl.fromTo("#qb", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.32 }, 18.35);
+      tl.fromTo("#ab", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.34 }, 18.95);
+      tl.to("#cites", { opacity: 1, duration: 0.3 }, 20.15);
+
+      /* ---------------------------------------------------- scene 6: rule */
+      tl.to("#stage", { opacity: 0, duration: 0.42 }, 21.35);
+      tl.fromTo("#rule", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6 }, 21.85);
+      tl.fromTo("#omark", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 22.75);
+      // beat-locked: 23.17s — the URL settles on the last strong cue.
+      tl.to("#ourl", { opacity: 1, duration: 0.42 }, 23.17);
+      tl.fromTo("#bed", { volume: 0.24 }, { volume: 0, duration: 1.4 }, 23.2);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

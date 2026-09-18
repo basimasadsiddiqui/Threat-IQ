@@ -1,5 +1,10 @@
 # ThreatIQ
 
+[![CI](https://github.com/basimasadsiddiqui/Threat-IQ/actions/workflows/ci.yml/badge.svg)](https://github.com/basimasadsiddiqui/Threat-IQ/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/live-threat--iq--project.streamlit.app-2f6fd8)](https://threat-iq-project.streamlit.app)
+[![Tests](https://img.shields.io/badge/tests-303%20passing-46a758)](#tests)
+[![License](https://img.shields.io/badge/license-MIT-8b93a1)](LICENSE)
+
 **An agentic AI security operations platform.** Submit a URL, domain, IP, file
 hash, CVE or a whole phishing email; ThreatIQ plans an investigation, calls
 real security APIs, correlates what comes back into a threat graph, scores the
@@ -11,6 +16,17 @@ risk score, the framework mapping and the remediation plan are all produced by
 deterministic code. The LLM explains those results and is structurally
 prevented from inventing them, remove the API key entirely and every
 conclusion is still reached.
+
+| | | | |
+|---|---|---|---|
+| **15** tools | **4** specialist agents | **7** weighted risk factors | **46** knowledge-base entries |
+| 9 need no API key | routed deterministically | every one inspectable | OWASP, CWE, MITRE, NIST |
+
+**303 tests**, no network access required &middot; CI on Python 3.11 and 3.12 with
+ruff, bandit and pip-audit &middot; both Docker images built on every push.
+
+[**Try it live**](https://threat-iq-project.streamlit.app) &mdash; it holds no API
+keys, so bring your own on the **API keys** page, or run it with none at all.
 
 ---
 
@@ -195,6 +211,42 @@ so plain HTTP hands both to anyone on the path.
 
 ## Architecture: how an investigation runs
 
+```mermaid
+flowchart TD
+    IN([URL · domain · IP · file hash · CVE · whole email]) --> ORC
+
+    ORC[["orchestrator<br/>classify · extract IOCs · choose specialists"]]
+
+    ORC -->|mandatory per input kind| TI[threat intel]
+    ORC -->|mandatory per input kind| PH[phishing / BEC]
+    ORC -->|mandatory per input kind| VU[vulnerability]
+    ORC -.->|opt-in, twice gated| WS[websec / active scan]
+
+    TI --- TIT["VirusTotal · AbuseIPDB<br/>urlscan · DNS · RDAP · HTTP"]
+    PH --- PHT["email headers<br/>lookalike · BEC patterns"]
+    VU --- VUT["NVD · CISA KEV"]
+
+    TI --> COR
+    PH --> COR
+    VU --> COR
+    WS --> COR
+
+    COR[correlation<br/>threat graph · campaign linkage · dedup] --> RISK
+    RISK[["risk engine<br/>deterministic 0-100, 7 weighted factors"]] --> CMP
+    CMP[compliance mapper<br/>RAG-grounded OWASP / CWE / MITRE / NIST] --> REM
+    REM[remediation<br/>playbook, prioritised] --> REP([report])
+
+    classDef det fill:#141b23,stroke:#2f6fd8,stroke-width:2px,color:#e6edf3
+    classDef agent fill:#141b23,stroke:#243040,color:#e6edf3
+    classDef tool fill:#0b0f14,stroke:#243040,color:#9aa6b2
+    class ORC,RISK det
+    class TI,PH,VU,WS,COR,CMP,REM agent
+    class TIT,PHT,VUT tool
+```
+
+<details>
+<summary>The same pipeline as plain text</summary>
+
 ```
                             submitted input
                                    │
@@ -238,6 +290,13 @@ so plain HTTP hands both to anyone on the path.
                         │      Report      │
                         └──────────────────┘
 ```
+</details>
+
+
+A LangSmith trace of a single investigation is the clearest view of this
+fan-out, and `docs/langsmith-trace.md` has the steps to capture one. Tracing is
+off by default because it sends prompt content to a third party, and this
+project analyses hostile material by definition.
 
 The orchestrator's routing is **deterministic first**: input kind maps to a
 mandatory set of specialists, and the LLM may only *add* an optional agent it
@@ -614,6 +673,9 @@ is rejected with a 422).
 
 ### The report
 
+![The report view: risk headline, severity strip, and the Flaws and vulnerabilities tab showing a CISA KEV vulnerability card](screenshots/01-report-flaws.png)
+
+
 The report opens on **Flaws and vulnerabilities**, kept separate from **Threat
 intelligence**. They answer different questions and go to different people:
 one is "what is wrong with our systems", the other is "who is coming at us".
@@ -632,6 +694,9 @@ counters, because the first question is proportion, and proportion is what a
 stacked bar answers at a glance.
 
 ### The threat graph
+
+![The threat graph after the physics settle, with the verdict legend and layout controls](screenshots/02-threat-graph.png)
+
 
 Written against vis-network directly rather than through PyVis's page template.
 The stock template emits a dead `../node_modules/vis/dist/vis.js` path and

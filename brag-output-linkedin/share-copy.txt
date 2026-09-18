@@ -1,0 +1,15 @@
+Paste a suspicious domain into ThreatIQ and watch the whole thing run: it
+classifies the input, fans out to four specialist agents, correlates what comes
+back, and returns a named report — 66.9/100 HIGH, brand impersonation, with the
+remediation you should action first.
+
+The part I am most pleased with is the line nobody usually ships: "Scored on 56%
+of the model's weight." When a source could not be reached, ThreatIQ reports the
+gap instead of scoring it as zero, because a missing lookup is not evidence of
+safety.
+
+Risk scores, framework mappings and remediation are computed by deterministic
+code. The model writes the narrative around them. Tools collect facts, the model
+interprets them.
+
+Live: threat-iq-project.streamlit.app
